@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderCcmChartPng } from "../../src/utils/ccm-chart-png.js";
+import fs from "fs";
 
 describe("renderCcmChartPng", () => {
   it("returns a PNG buffer with signature", () => {
@@ -14,6 +15,8 @@ describe("renderCcmChartPng", () => {
       },
       { width: 640, height: 400 },
     );
+    fs.mkdirSync("scratch", { recursive: true });
+    fs.writeFileSync("scratch/bar.png", buf);
     expect(buf.length).toBeGreaterThan(100);
     expect(buf[0]).toBe(0x89);
     expect(buf[1]).toBe(0x50);
@@ -38,6 +41,26 @@ describe("renderCcmChartPng", () => {
       },
       { width: 640, height: 400 },
     );
+    fs.mkdirSync("scratch", { recursive: true });
+    fs.writeFileSync("scratch/grouped.png", buf);
+
+    // Also render a line chart and save it
+    const lineBuf = renderCcmChartPng(
+      {
+        kind: "line",
+        title: "Daily Spend",
+        y_label: "USD",
+        points: [
+          { label: "Day 1", value: 10 },
+          { label: "Day 2", value: 45 },
+          { label: "Day 3", value: 30 },
+          { label: "Day 4", value: 80 },
+        ],
+      },
+      { width: 640, height: 400 },
+    );
+    fs.writeFileSync("scratch/line.png", lineBuf);
+
     expect(buf.length).toBeGreaterThan(100);
     expect(buf[0]).toBe(0x89);
   });
