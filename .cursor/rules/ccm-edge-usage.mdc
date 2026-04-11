@@ -1,0 +1,235 @@
+---
+description: CCM via ccm-edge MCP — perspectives, cost categories, breakdown, anomalies, charts, spike triage
+alwaysApply: true
+---
+
+# CCM Edge (`ccm-edge` MCP) — how to work
+
+MCP server: **`http://localhost:3000/mcp`**
+---
+
+## 1. Resolve perspective, then query
+
+1. **List all perspectives** (including custom ones): **`harness_list`** `resource_type: "cost_perspective"`. Search by name with `search_term`. Returns `id`, `name`, `viewType`, `dataSources`, etc.
+2. **Quick default perspective IDs:** **`harness_list`** `resource_type: "cost_summary"` with **no** `perspective_id` → read **`defaultAwsPerspectiveId`**, **`defaultGcpPerspectiveId`**, etc.
+3. Build queries with: `perspective_id`, `time_filter` (or `start_time_ms`/`end_time_ms`), **`group_by`** for rollups.
+4. **Resource types**
+   - **`cost_breakdown`** — per-entity cost + costTrend (% change vs previous period). **One call = both periods.**
+   - **`cost_timeseries`** — daily/weekly/monthly cost over time, grouped by dimension.
+   - **`cost_summary`** — total cost, trend, idle, unallocated, efficiency score, forecast.
+   - **`cost_category`** — business mappings (list returns **name + uuid only**; use `harness_get` for full rules).
+5. Never omit **`perspective_id`** where required.
+6. **Period comparison — single query:** Query the **current** window; each row returns **`cost`** (current total) **and `costTrend`** (% change vs prior equal-length window). Derive previous:
+   \$\text{previous cost} = \text{cost} / (1 + \text{costTrend} / 100)\$
+   Do **not** run two separate breakdown queries just to get current vs previous totals.
+
+---
+
+## 2. Cost category filtering — `filter_cost_category_value`
+
+To drill into a **specific cost category bucket** (e.g. a Business Unit) broken down by another dimension — **one call**, not 10+:
+
+```json
+{
+  "resource_type": "cost_breakdown",
+  "perspective_id": "<id>",
+  "business_mapping_name": "Business Units",
+  "filter_cost_category_value": "onetru-credit",
+  "group_by": "gcp_project_id"
+}
+```
+
+- **`business_mapping_name`**: which cost category mapping (auto-resolves name → UUID).
+- **`filter_cost_category_value`**: bucket name(s) to scope to (comma-separated or use `filter_cost_category_values` for array).
+- Works on **`cost_breakdown`**, **`cost_timeseries`**, and **`cost_summary`**.
+- The `group_by` can be any dimension — the filter scopes server-side, then groups by whatever you choose.
+
+---
+
+## 3. Usage-only (persist for the thread)
+
+If the user asks for **Usage only** (run-rate / usage-based cost):
+
+1. **Keep that constraint** for every follow-up. Do **not** silently switch to full bill without saying scope changed.
+2. **Label numbers:** `cost_trend` / `cost_timeseries` / domain rollups are often **full CCM cost** (RIFee, Savings Plan, Tax, …). When the ask is Usage-only, say so when quoting those totals.
+3. **Spikes:** RIFee-driven moves are **not** usage spikes; report fees separately or out-of-scope for usage.
+4. **AWS Usage-only — required filter:** add **`"filter_aws_line_item_type": "Usage"`** for **`cost_breakdown`**, **`cost_timeseries`**, **`cost_drilldown`**.
+
+---
+
+## 4. Charts — ALWAYS generate
+
+**Every cost query that returns data MUST include an inline chart.** Charts are not optional — they are the primary deliverable. Text summaries are supplementary.
+
+1. **Always chart:** After any `cost_breakdown`, `cost_timeseries`, `cost_summary`, or anomaly query that returns data, generate a chart with **`harness_ccm_chart`**. Do not skip this step.
+2. **Chart kind:** Use **`kind_hint: "line"`** for daily/time series. Use **`kind_hint: "bar"`** or **`grouped_bar`** for comparisons and breakdowns.
+3. **Chart sizes:** `chart_size: "medium"` (960×540, default) or `chart_size: "large"` (1920×1080, 2× all dimensions). Use `"large"` for reports and triage documents.
+4. **Inline first:** The tool returns `image/png` — present it so the user sees the chart directly in the chat. This is the primary output.
+5. **Save to disk:** Use `output_path: "triage/assets/<filename>.png"` when creating markdown reports — saves AND returns inline in the same call. Do not write PNGs to disk unless creating a report or the user explicitly asks.
+6. **No chart-less responses:** If you have cost data, you have a chart. Period.
+
+---
+
+## 5. Cost spike investigation — repeatable pattern
+
+Use this **same sequence** whenever the user asks what drove a **spike**, **day-over-day jump**, or **period vs period** increase. Adapt dimensions to the cloud (below defaults to **GCP**; substitute AWS fields from `harness_describe`).
+
+### A. Lock the question
+
+1. **Metric:** Full CCM cost vs **Usage-only** — if Usage-only, keep **§3** for the whole investigation.
+2. **Comparison:** two windows of equal length, **UTC**, via **`start_time_ms` / `end_time_ms`**.
+3. **Perspective:** Resolve **`perspective_id`** per **§1**; never omit it.
+
+### B. See the shape (when it started)
+
+1. **`cost_timeseries`** with **`time_resolution: DAY`** at a **coarse** `group_by` (e.g. **`gcp_product`**, **`product`**, **`cloudProvider`**).
+2. Optionally scope with filters (account, project, product, `filter_cost_category_value`).
+
+### C. Isolate *where* (ownership)
+
+1. **`cost_breakdown`** with a **placement** group-by, e.g. GCP **`gcp_project_id`**, AWS account / service — **same UTC windows**.
+2. Rank entities by **delta** or by **cost** on the spike window. Use **`limit` / `offset`** for pagination.
+3. If scoping to a **single project/account**, add **`filter_gcp_project_id`** (or AWS equivalent).
+4. If scoping to a **cost category bucket**, add **`filter_cost_category_value`** + **`business_mapping_name`**.
+
+### D. Explain *what* moved the dollars
+
+1. **`cost_breakdown`** with **`group_by`** on finest billing grain — for GCP: **`gcp_sku_description`** (or **`gcp_product`** for summary).
+2. Compare same two windows; report **largest positive deltas** first, then offsets.
+
+### E. Show *how it evolved*
+
+1. **`cost_timeseries`**, **`time_resolution: DAY`**, same **`group_by`** as D, **2+ weeks** for context.
+2. **Data lag:** most recent calendar day may be partial; state the last day included.
+
+### F. Optional: named resources
+
+1. **`group_by: gcpResourceGlobalName`** with same filters. Use for attribution/naming, not reconciliation.
+
+### G. Chart for the user
+
+1. Build **`chart_spec`** from the series in E → **`harness_ccm_chart`** with `chart_size: "large"` for reports.
+2. Deliver **inline**; use `output_path` when creating triage reports.
+
+### H. Short checklist
+
+**Perspective → UTC windows → coarse trend → owner (project/account) → SKU/line-item delta → daily series chart → optional resource names → inline chart.**
+
+### Creating markdown reports
+1. **Always include the original user prompt** at the top under `## Request`.
+2. Use `harness_ccm_chart` with `output_path: "triage/assets/<filename>.png"` to save chart PNGs to disk in the same call.
+
+---
+
+## 6. Cost anomaly investigation — three-step pattern
+
+Use this when the user asks about **anomalies**, **unexpected spikes**, or **alerts**.
+
+| Step | Resource Type | Tool | Purpose |
+|------|--------------|------|---------|
+| 1 | `cost_anomaly_summary` | `harness_list` | Anomaly counts by dimension + day |
+| 2 | `cost_anomaly` | `harness_list` | Individual anomaly records (drill into a day) |
+| 3 | `cost_anomaly` | `harness_get` | Full details for one anomaly |
+
+---
+
+### Step 1 — Overview (`cost_anomaly_summary`)
+
+Get anomaly counts by dimension and day across the window:
+
+```json
+{
+  "resource_type": "cost_anomaly_summary",
+  "perspective_id": "<perspective_id>",
+  "group_by": "gcp_product",
+  "time_resolution": "DAY",
+  "start_time_ms": 1775260800000,
+  "end_time_ms": 1775951999000
+}
+```
+
+Returns: daily rows with `anomalyCount`, `actualCost`, `differenceFromExpectedCost`. Identify **which days** had the most anomalies and largest excess spend.
+
+---
+
+### Step 2 — Drill down (`cost_anomaly` list)
+
+Drill into individual anomaly records for a specific day:
+
+```json
+{
+  "resource_type": "cost_anomaly",
+  "perspective_id": "<perspective_id>",
+  "group_by": "gcp_product",
+  "anomaly_start_ms": 1775433600000,
+  "anomaly_end_ms": 1775519999000,
+  "status": "ACTIVE",
+  "order_by": "ANOMALOUS_SPEND",
+  "limit": 10
+}
+```
+
+- **`anomaly_start_ms` / `anomaly_end_ms`**: scope to a specific day (UTC midnight to 23:59:59.999).
+- **`order_by`**: `ANOMALOUS_SPEND` surfaces highest-impact first.
+- **`status`**: `ACTIVE` for open anomalies; omit for all.
+
+Returns: individual anomaly records with `id`, `resourceName`, `actualAmount`, `expectedAmount`, `anomalousSpend`, `anomalousSpendPercentage`, `criticality`.
+
+---
+
+### Step 3 — Full detail (`cost_anomaly` get)
+
+Fetch complete details for a single anomaly by its `id`:
+
+```json
+{
+  "resource_type": "cost_anomaly",
+  "resource_id": "<anomaly_id>"
+}
+```
+
+Returns: full anomaly record including `dailyBreakdown`, expected cost bounds, `userFeedback`.
+
+---
+
+### Anomaly investigation checklist
+
+1. **Step 1** (`cost_anomaly_summary`): full window overview → identify peak day(s).
+2. **Step 2** (`cost_anomaly` list): drill to peak day → rank individual anomalies by impact.
+3. **Step 3** (`cost_anomaly` get): fetch full detail for top anomaly `id`(s).
+4. **Re-drill** Step 2 with finer `group_by` (e.g. `gcp_product` → `gcp_project_id` → `gcp_sku_description`).
+5. Cross-reference with `cost_timeseries` / `cost_breakdown` to determine one-off vs persistent.
+6. Chart anomalous spend if helpful (`harness_ccm_chart`).
+
+---
+
+## 7. Available group_by dimensions
+
+| Dimension | Field | Cloud |
+|-----------|-------|-------|
+| Product (cross-cloud) | `product` | All |
+| Region | `region` | All |
+| Cloud Provider | `cloudProvider` | All |
+| GCP Project | `gcp_project_id` | GCP |
+| GCP Product | `gcp_product` | GCP |
+| GCP SKU | `gcp_sku_description` | GCP |
+| GCP Billing Account | `gcp_billing_account_id` | GCP |
+| GCP Invoice Month | `gcp_invoice_month` | GCP |
+| GCP Resource Name | `gcpResourceGlobalName` | GCP |
+| AWS Service | `awsServicecode` | AWS |
+| AWS Account | `awsUsageaccountid` | AWS |
+| AWS Instance Type | `awsInstancetype` | AWS |
+| AWS Usage Type | `awsUsageType` | AWS |
+| AWS Line Item Type | `awsLineItemType` | AWS |
+| Cost Category / BU | `cost_category` | All (requires `business_mapping_name`) |
+| Resource Tags | `resource_tag` | All (requires `tag_key`) |
+
+---
+
+## 8. Time filter presets
+
+`LAST_7`, `THIS_MONTH`, `LAST_30_DAYS`, `THIS_QUARTER`, `THIS_YEAR`, `LAST_MONTH`, `LAST_QUARTER`, `LAST_YEAR`, `LAST_3_MONTHS`, `LAST_6_MONTHS`, `LAST_12_MONTHS`
+
+Or use `start_time_ms` / `end_time_ms` (epoch ms, UTC) for custom windows.
+
+---

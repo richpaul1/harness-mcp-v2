@@ -170,10 +170,11 @@ export class HarnessClient {
           ? (typeof options.body === "string" ? options.body : JSON.stringify(options.body))
           : undefined;
         const requestBodyBytes = bodyString?.length ?? 0;
+        const requestBody = bodyString ? bodyString.slice(0, 1000) : undefined;
 
-        log.debug(`${method} ${url}`);
+        log.info("Harness API request", { method, path, url });
         if (bodyString) {
-          log.debug("Request body", { body: bodyString.slice(0, 1000) });
+          log.debug("Request body", { body: requestBody });
         }
 
         const response = await fetch(url, {
@@ -217,7 +218,9 @@ export class HarnessClient {
             attempt: attempt + 1,
             maxAttempts: this.maxRetries + 1,
             responseBytes: body.length,
+            responseBody: body.slice(0, 1000),
             requestBodyBytes,
+            requestBody,
           });
 
           if (willRetry) {
@@ -243,6 +246,7 @@ export class HarnessClient {
             attempt: attempt + 1,
             responseBytes: 0,
             requestBodyBytes,
+            requestBody,
           });
           throw new HarnessApiError(
             `Empty response body from ${method} ${path}`,
@@ -263,6 +267,7 @@ export class HarnessClient {
             attempt: attempt + 1,
             responseBytes: text.length,
             requestBodyBytes,
+            requestBody,
           });
           throw new HarnessApiError(
             `Non-JSON response from ${method} ${path}: ${text.slice(0, 200)}`,
@@ -282,6 +287,7 @@ export class HarnessClient {
           attempt: attempt + 1,
           responseBytes: text.length,
           requestBodyBytes,
+          requestBody,
         });
         log.debug("Response body", { body: text.slice(0, 1000) });
         return data as T;

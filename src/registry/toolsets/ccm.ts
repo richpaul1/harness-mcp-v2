@@ -1,5 +1,5 @@
 import type { ToolsetDefinition } from "../types.js";
-import { ngExtract, pageExtract, passthrough, gqlExtract, ccmBusinessMappingListExtract } from "../extractors.js";
+import { ngExtract, pageExtract, passthrough, gqlExtract, ccmBusinessMappingListExtract, ccmBusinessMappingListCompactExtract } from "../extractors.js";
 
 // ---------------------------------------------------------------------------
 // GraphQL queries — ported from the official Go MCP server
@@ -122,6 +122,36 @@ query FetchCcmMetaData {
     defaultGcpPerspectiveId defaultClusterPerspectiveId
     defaultExternalDataPerspectiveId showCostOverview
     currencyPreference { destinationCurrency symbol locale setupTime __typename }
+    __typename
+  }
+}`;
+
+const PERSPECTIVES_LIST_QUERY = `
+query FetchAllPerspectives(
+  $folderId: String,
+  $sortCriteria: QLCEViewSortCriteriaInput = null,
+  $pageNo: Int,
+  $pageSize: Int,
+  $searchKey: String,
+  $filters: [CloudFilter]
+) {
+  perspectives(
+    folderId: $folderId
+    sortCriteria: $sortCriteria
+    pageNo: $pageNo
+    pageSize: $pageSize
+    searchKey: $searchKey
+    cloudFilters: $filters
+  ) {
+    totalCount
+    views {
+      id name chartType viewType viewState
+      createdAt lastUpdatedAt timeRange
+      dataSources folderId folderName
+      reportScheduledConfigured
+      groupBy { fieldId fieldName identifier identifierName __typename }
+      __typename
+    }
     __typename
   }
 }`;
@@ -407,6 +437,37 @@ function buildOptionalPerspectiveIdFilters(input?: Record<string, unknown>): Rec
     });
   }
 
+  // Cost category bucket filter — scope results to specific value(s) within a business mapping.
+  // Requires business_mapping_field_id (resolved from business_mapping_name by registry dispatch).
+  const costCatValues = firstNonEmptyStringList(
+    input?.filter_cost_category_values,
+    input?.filter_cost_category_value,
+  );
+  if (costCatValues.length > 0) {
+    const fieldId =
+      typeof input?.business_mapping_field_id === "string"
+        ? input.business_mapping_field_id.trim()
+        : "";
+    if (!fieldId) {
+      throw new Error(
+        "filter_cost_category_value requires business_mapping_name (or business_mapping_field_id) " +
+          "to identify which cost category mapping the bucket belongs to.",
+      );
+    }
+    out.push({
+      idFilter: {
+        operator: "IN",
+        values: costCatValues,
+        field: {
+          fieldId,
+          fieldName: "Business Mapping",
+          identifier: "BUSINESS_MAPPING",
+          identifierName: "Business Mapping",
+        },
+      },
+    });
+  }
+
   return out;
 }
 
@@ -589,17 +650,45 @@ export const ccmToolset: ToolsetDefinition = {
       resourceType: "cost_perspective",
       displayName: "Cost Perspective",
       description:
-        "A cloud cost perspective (saved view). Use harness_list to see all perspectives, harness_get for details. This is the starting point — get a perspective_id first, then use cost_breakdown or cost_timeseries to drill into costs.",
+        "A cloud cost perspective (saved view). Use harness_list to see all perspectives (including custom ones), harness_get for details. This is the starting point — get a perspective_id first, then use cost_breakdown or cost_timeseries to drill into costs.",
       toolset: "ccm",
       scope: "account",
       identifierFields: ["perspective_id"],
+      listFilterFields: [
+        { name: "search_term", description: "Search perspectives by name" },
+        { name: "folder_id", description: "Filter by folder ID" },
+      ],
       operations: {
         list: {
-          method: "GET",
-          path: "/ccm/api/perspectives",
-          queryParams: { page: "page", size: "size" },
-          responseExtractor: pageExtract,
-          description: "List all cost perspectives for the account",
+          method: "POST",
+          path: "/ccm/api/graphql",
+          bodyBuilder: (input) => ({
+            query: PERSPECTIVES_LIST_QUERY,
+            operationName: "FetchAllPerspectives",
+            variables: {
+              folderId: (input.folder_id as string) ?? "",
+              sortCriteria: { sortOrder: "DESCENDING", sortType: "TIME" },
+              pageSize: (input.size as number) ?? 20,
+              pageNo: (input.page as number) ?? 0,
+              searchKey: (input.search_term as string) ?? "",
+              filters: [],
+            },
+          }),
+          responseExtractor: (raw) => {
+            const r = raw as {
+              data?: {
+                perspectives?: {
+                  views?: unknown[];
+                  totalCount?: number;
+                };
+              };
+            };
+            return {
+              items: r.data?.perspectives?.views ?? [],
+              total: r.data?.perspectives?.totalCount ?? 0,
+            };
+          },
+          description: "List all cost perspectives (including custom ones) via GraphQL. Supports search_term and pagination.",
         },
         get: {
           method: "GET",
@@ -659,10 +748,14 @@ export const ccmToolset: ToolsetDefinition = {
     {
       resourceType: "cost_breakdown",
       displayName: "Cost Breakdown",
-      description: `Drill-down cost breakdown by any dimension within a perspective. Answers "where is my money going?" Returns cost per entity (e.g. per AWS service, per region, per product).
+      description: `Drill-down cost breakdown by any dimension within a perspective. Answers "where is my money going?" Returns cost AND costTrend per entity (e.g. per AWS service, per region, per cost category).
+
+Each row includes: name, id, cost (current period total), and costTrend (percentage change vs the equivalent previous period). A single query gives you both current and previous period comparison — no need to call twice with different time windows.
+
+To drill into a specific cost category bucket (e.g. a Business Unit) broken down by another dimension: set filter_cost_category_value to the bucket name, business_mapping_name to the mapping, and group_by to the drill-down dimension (e.g. gcp_project_id). This scopes all results to that bucket in one call.
 
 Required: perspective_id (get from cost_perspective list).
-Optional: group_by (${VALID_GROUP_BY_FIELDS.join(", ")}), time_filter (${VALID_TIME_FILTERS.join(", ")}), start_time_ms/end_time_ms (override preset), filter_gcp_project_id / filter_gcp_product / filter_product (QLCE idFilter scope), limit, offset.`,
+Optional: group_by (${VALID_GROUP_BY_FIELDS.join(", ")}), time_filter (${VALID_TIME_FILTERS.join(", ")}), start_time_ms/end_time_ms (override preset), filter_cost_category_value + business_mapping_name (scope to a cost category bucket), filter_gcp_project_id / filter_gcp_product / filter_product, limit, offset.`,
       toolset: "ccm",
       scope: "account",
       identifierFields: ["perspective_id"],
@@ -671,8 +764,17 @@ Optional: group_by (${VALID_GROUP_BY_FIELDS.join(", ")}), time_filter (${VALID_T
         { name: "time_filter", description: "Time range filter (ignored when start_time_ms and end_time_ms are set)", enum: [...VALID_TIME_FILTERS] },
         { name: "start_time_ms", description: "Custom window start (epoch ms, UTC); use with end_time_ms for period comparisons" },
         { name: "end_time_ms", description: "Custom window end (epoch ms, UTC); must be greater than start_time_ms" },
-        { name: "business_mapping_name", description: "Cost category name to resolve (default Business Domains); uuid used as group-by fieldId" },
+        { name: "business_mapping_name", description: "Cost category name to resolve (default Business Domains); uuid used as group-by fieldId and for filter_cost_category_value scoping" },
         { name: "business_mapping_field_id", description: "Cost category uuid from harness_list cost_category; required for group_by business_domain / cost_category if not auto-resolved" },
+        {
+          name: "filter_cost_category_value",
+          description:
+            "Scope results to specific bucket(s) within the named cost category (business mapping). " +
+            "One value or comma-separated values. Requires business_mapping_name (or business_mapping_field_id). " +
+            "Example: business_mapping_name='Business Units', filter_cost_category_value='onetru-credit', group_by='gcp_project_id' " +
+            "→ breaks down by GCP project scoped to that BU.",
+        },
+        { name: "filter_cost_category_values", description: "Array form of filter_cost_category_value (multiple bucket names)" },
         { name: "tag_key", description: 'Resource tag key when group_by is resource_tag, tag, tags, or labels (QLCE fieldName), e.g. "action-type"' },
         { name: "resource_tag_key", description: "Alias for tag_key" },
         { name: "tag_field_id", description: 'QLCE label field id; default "labels.value"' },
@@ -735,7 +837,7 @@ Optional: group_by (${VALID_GROUP_BY_FIELDS.join(", ")}), time_filter (${VALID_T
             };
           },
           description:
-            "Get cost breakdown by dimension for a perspective. Group by region, awsServicecode, product, cloudProvider, etc.",
+            "Get cost breakdown by dimension for a perspective. Each row returns cost (current period total) and costTrend (% change vs previous period) — one call covers both periods. Group by region, awsServicecode, product, cloudProvider, cost_category, etc.",
         },
       },
     },
@@ -750,8 +852,10 @@ Optional: group_by (${VALID_GROUP_BY_FIELDS.join(", ")}), time_filter (${VALID_T
       displayName: "Cost Time Series",
       description: `Cost over time for a perspective, grouped by a dimension. Answers "how has my spend changed?" Returns daily/monthly cost data points.
 
+Supports filter_cost_category_value to scope the time series to specific bucket(s) within a cost category (e.g. a Business Unit), combined with any group_by dimension.
+
 Required: perspective_id, group_by (${VALID_GROUP_BY_FIELDS.join(", ")}).
-Optional: time_filter (${VALID_TIME_FILTERS.join(", ")}), start_time_ms/end_time_ms (override preset), filter_gcp_project_id / filter_gcp_product / filter_product, time_resolution (DAY, MONTH, WEEK), limit.`,
+Optional: time_filter (${VALID_TIME_FILTERS.join(", ")}), start_time_ms/end_time_ms (override preset), filter_cost_category_value + business_mapping_name, filter_gcp_project_id / filter_gcp_product / filter_product, time_resolution (DAY, MONTH, WEEK), limit.`,
       toolset: "ccm",
       scope: "account",
       identifierFields: ["perspective_id"],
@@ -761,8 +865,15 @@ Optional: time_filter (${VALID_TIME_FILTERS.join(", ")}), start_time_ms/end_time
         { name: "start_time_ms", description: "Custom window start (epoch ms, UTC); use with end_time_ms for period comparisons" },
         { name: "end_time_ms", description: "Custom window end (epoch ms, UTC); must be greater than start_time_ms" },
         { name: "time_resolution", description: "Time resolution for aggregation", enum: ["DAY", "MONTH", "WEEK"] },
-        { name: "business_mapping_name", description: "Cost category name to resolve (default Business Domains); uuid used as group-by fieldId" },
+        { name: "business_mapping_name", description: "Cost category name to resolve (default Business Domains); uuid used as group-by fieldId and for filter_cost_category_value scoping" },
         { name: "business_mapping_field_id", description: "Cost category uuid from harness_list cost_category; required for group_by business_domain / cost_category if not auto-resolved" },
+        {
+          name: "filter_cost_category_value",
+          description:
+            "Scope results to specific bucket(s) within the named cost category. " +
+            "One value or comma-separated. Requires business_mapping_name (or business_mapping_field_id).",
+        },
+        { name: "filter_cost_category_values", description: "Array form of filter_cost_category_value" },
         { name: "tag_key", description: 'Resource tag key when group_by is resource_tag, tag, tags, or labels' },
         { name: "resource_tag_key", description: "Alias for tag_key" },
         { name: "tag_field_id", description: 'QLCE label field id; default "labels.value"' },
@@ -840,6 +951,15 @@ Use with no perspective_id to get CCM metadata (available connectors, default pe
         { name: "time_filter", description: "Time range filter" },
         { name: "start_time_ms", description: "Custom window start (epoch ms, UTC); use with end_time_ms" },
         { name: "end_time_ms", description: "Custom window end (epoch ms, UTC)" },
+        { name: "business_mapping_name", description: "Cost category name to resolve (default Business Domains); needed for filter_cost_category_value" },
+        { name: "business_mapping_field_id", description: "Cost category uuid; alternative to business_mapping_name" },
+        {
+          name: "filter_cost_category_value",
+          description:
+            "Scope summary to specific bucket(s) within a cost category. " +
+            "Requires business_mapping_name (or business_mapping_field_id).",
+        },
+        { name: "filter_cost_category_values", description: "Array form of filter_cost_category_value" },
         { name: "filter_gcp_project_id", description: "GCP project id(s) to scope summary (comma-separated or filter_gcp_project_ids)" },
         { name: "filter_gcp_project_ids", description: "Array of GCP project ids" },
         { name: "filter_gcp_product", description: "GCP product name(s) to scope" },
@@ -1061,48 +1181,167 @@ Replaces the 5 separate resource-type tools from the official server (EC2, Azure
       displayName: "Cost Anomaly",
       description: `Detected cloud cost anomalies — unexpected cost spikes. Answers "are there any unusual charges?"
 
-Filter by: perspective_id, status (ACTIVE, IGNORED, ARCHIVED, RESOLVED), min_amount, min_anomalous_spend, limit, offset.
-All the separate anomaly tools from the official server (list, list_all, list_ignored, by_perspective) are unified here via filter parameters.`,
+Recommended drill-down flow:
+1. **cost_anomaly_summary** list with perspective_id + group_by + time range → anomaly counts by dimension/day (which entities have spikes)
+2. **cost_anomaly** list with anomaly_start_ms/anomaly_end_ms + perspective_id → individual anomaly records for a specific day
+3. **cost_anomaly** get with anomaly_id → full details for a single anomaly (root cause, cost breakdown, timeline)
+
+list (v2) supports: perspective_id for scoping, anomaly_start_ms/anomaly_end_ms for day drill-down, status, search_text, order_by, limit/offset.`,
       toolset: "ccm",
       scope: "account",
       identifierFields: ["anomaly_id"],
       listFilterFields: [
-        { name: "perspective_id", description: "Cost perspective identifier" },
+        { name: "perspective_id", description: "Perspective to scope anomalies to" },
         { name: "status", description: "Anomaly status filter", enum: ["ACTIVE", "IGNORED", "ARCHIVED", "RESOLVED"] },
         { name: "min_amount", description: "Minimum amount threshold", type: "number" },
         { name: "min_anomalous_spend", description: "Minimum anomalous spend threshold", type: "number" },
+        { name: "anomaly_start_ms", description: "Filter anomalies AFTER this timestamp (epoch ms) — drill into a specific day/window" },
+        { name: "anomaly_end_ms", description: "Filter anomalies BEFORE this timestamp (epoch ms) — drill into a specific day/window" },
+        { name: "search_text", description: "Search text to filter anomalies by name" },
+        { name: "order_by", description: "Sort field for list results", enum: ["ANOMALOUS_SPEND", "ACTUAL_AMOUNT", "TIME"] },
+        { name: "order_direction", description: "Sort direction", enum: ["ASCENDING", "DESCENDING"] },
         { name: "limit", description: "Result limit", type: "number" },
         { name: "offset", description: "Pagination offset", type: "number" },
+        { name: "group_by", description: "Group dimension (for get: perspective summary; for list: perspective scoping)", enum: [...VALID_GROUP_BY_FIELDS] },
+        { name: "time_filter", description: "Perspective time range preset (for get/list perspective scoping, ignored when start_time_ms/end_time_ms set)", enum: [...VALID_TIME_FILTERS] },
+        { name: "start_time_ms", description: "Perspective window start (epoch ms, UTC); for get and list perspective scoping" },
+        { name: "end_time_ms", description: "Perspective window end (epoch ms, UTC); for get and list perspective scoping" },
+        { name: "time_resolution", description: "Time aggregation for get operation", enum: ["DAY", "MONTH", "WEEK"] },
+        { name: "business_mapping_name", description: "Cost category name (for group_by cost_category)" },
+        { name: "business_mapping_field_id", description: "Cost category uuid (for group_by cost_category)" },
+        { name: "tag_key", description: "Resource tag key (for group_by resource_tag)" },
       ],
       operations: {
         list: {
           method: "POST",
-          path: "/ccm/api/anomaly",
-          queryParams: {
-            perspective_id: "perspectiveId",
-          },
+          path: "/ccm/api/anomaly/v2/list",
           bodyBuilder: (input) => {
-            const filters: Record<string, unknown> = {
+            const anomalyFilter: Record<string, unknown> = {
               filterType: "Anomaly",
-              limit: (input.limit as number) ?? 25,
+              limit: (input.limit as number) ?? 10,
               offset: (input.offset as number) ?? 0,
+              groupBy: [],
             };
 
             if (input.status) {
-              filters.status = Array.isArray(input.status) ? input.status : [input.status];
+              anomalyFilter.status = Array.isArray(input.status) ? input.status : [input.status];
             }
             if (input.min_amount) {
-              filters.minActualAmount = input.min_amount;
+              anomalyFilter.minActualAmount = input.min_amount;
             }
             if (input.min_anomalous_spend) {
-              filters.minAnomalousSpend = input.min_anomalous_spend;
+              anomalyFilter.minAnomalousSpend = input.min_anomalous_spend;
             }
 
-            return { anomalyFilterPropertiesDTO: filters };
+            const searchText =
+              typeof input.search_text === "string" && input.search_text.trim()
+                ? [input.search_text.trim()]
+                : [""];
+            anomalyFilter.searchText = searchText;
+
+            // Anomaly-level time filters (drill into a specific day)
+            const timeFilters: Record<string, unknown>[] = [];
+            if (typeof input.anomaly_start_ms === "number" && Number.isFinite(input.anomaly_start_ms)) {
+              timeFilters.push({ operator: "AFTER", timestamp: input.anomaly_start_ms });
+            }
+            if (typeof input.anomaly_end_ms === "number" && Number.isFinite(input.anomaly_end_ms)) {
+              timeFilters.push({ operator: "BEFORE", timestamp: input.anomaly_end_ms });
+            }
+            if (timeFilters.length > 0) {
+              anomalyFilter.timeFilters = timeFilters;
+            }
+
+            // Order by
+            const orderField = (input.order_by as string) ?? "ANOMALOUS_SPEND";
+            const orderDir = (input.order_direction as string) ?? "DESCENDING";
+            anomalyFilter.orderBy = [{ field: orderField, order: orderDir }];
+
+            const body: Record<string, unknown> = { anomalyFilterPropertiesDTO: anomalyFilter };
+
+            // Perspective scoping (optional) — adds perspectiveQueryDTO with filters + groupBy
+            if (input.perspective_id) {
+              const perspectiveId = input.perspective_id as string;
+              const timeFilter = (input.time_filter as string) ?? "LAST_30_DAYS";
+              const perspectiveFilters = buildFilters(perspectiveId, timeFilter, input as Record<string, unknown>);
+              const perspectiveGroupBy = input.group_by
+                ? buildGroupBy(input.group_by as string, input as Record<string, unknown>)
+                : [];
+
+              body.perspectiveQueryDTO = {
+                filters: perspectiveFilters,
+                groupBy: perspectiveGroupBy,
+              };
+            }
+
+            return body;
           },
           responseExtractor: ngExtract,
           description:
-            "List cost anomalies. Filter by status (ACTIVE/IGNORED/ARCHIVED/RESOLVED), perspective_id, min_amount, min_anomalous_spend.",
+            "List cost anomalies (v2). Supports anomaly_start_ms/anomaly_end_ms to drill into a specific day, " +
+            "perspective_id + group_by to scope by perspective and dimension, status, search_text, order_by.",
+        },
+        get: {
+          method: "GET",
+          path: "/ccm/api/anomaly/v2/drill-down",
+          queryParams: { anomaly_id: "anomalyId" },
+          responseExtractor: ngExtract,
+          description:
+            "Get full details for a single anomaly by anomaly_id — root cause, cost breakdown, timeline. " +
+            "Use after listing anomalies to drill into a specific one.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 6b. cost_anomaly_summary — perspective-scoped anomaly summary by dimension + time
+    //     Answers: "Which projects/services/regions have anomalies this week?"
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_anomaly_summary",
+      displayName: "Cost Anomaly Summary (by Perspective)",
+      description: `Perspective-scoped anomaly summary grouped by a dimension (e.g. GCP project, product) and time. Answers "which entities have cost spikes?"
+
+Requires perspective_id. Returns anomaly counts/totals per dimension per time bucket — use to identify which entities have spikes before drilling into specific anomalies with cost_anomaly list + anomaly_start_ms/anomaly_end_ms.
+
+Supports the same group_by dimensions as cost_breakdown (${VALID_GROUP_BY_FIELDS.slice(0, 10).join(", ")}, etc.) and time_resolution (DAY, MONTH, WEEK).`,
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: ["perspective_id"],
+      listFilterFields: [
+        { name: "perspective_id", description: "Perspective UUID (required)" },
+        { name: "group_by", description: "Group anomalies by dimension", enum: [...VALID_GROUP_BY_FIELDS] },
+        { name: "time_filter", description: "Time range preset (ignored when start_time_ms/end_time_ms set)", enum: [...VALID_TIME_FILTERS] },
+        { name: "start_time_ms", description: "Custom window start (epoch ms, UTC)" },
+        { name: "end_time_ms", description: "Custom window end (epoch ms, UTC)" },
+        { name: "time_resolution", description: "Time aggregation resolution", enum: ["DAY", "MONTH", "WEEK"] },
+        { name: "business_mapping_name", description: "Cost category name (for group_by cost_category)" },
+        { name: "business_mapping_field_id", description: "Cost category uuid (for group_by cost_category)" },
+        { name: "tag_key", description: "Resource tag key (for group_by resource_tag)" },
+      ],
+      operations: {
+        list: {
+          method: "POST",
+          path: "/ccm/api/anomaly/perspective/{perspectiveId}",
+          pathParams: { perspective_id: "perspectiveId" },
+          bodyBuilder: (input) => {
+            const perspectiveId = input.perspective_id as string;
+            const timeFilter = (input.time_filter as string) ?? "LAST_30_DAYS";
+
+            const filters = buildFilters(perspectiveId, timeFilter, input as Record<string, unknown>);
+
+            const timeResolution = (input.time_resolution as string) ?? "DAY";
+            const entityGroupBy = buildGroupBy(input.group_by as string | undefined, input as Record<string, unknown>);
+            const groupBy = [
+              entityGroupBy[0],
+              { timeTruncGroupBy: { resolution: timeResolution } },
+            ];
+
+            return { filters, groupBy };
+          },
+          responseExtractor: ngExtract,
+          description:
+            "Get anomaly summary for a perspective grouped by dimension and time. " +
+            "Shows which entities (projects, services, regions) have cost spikes.",
         },
       },
     },
@@ -1147,11 +1386,10 @@ All the separate anomaly tools from the official server (list, list_all, list_ig
             sort_order: "sortOrder",
             sort_type: "sortType",
           },
-          responseExtractor: ccmBusinessMappingListExtract,
+          responseExtractor: ccmBusinessMappingListCompactExtract,
           description:
-            "List cost categories / business mappings (CCM UI parity: searchKey, limit, offset, sortOrder, sortType). " +
-            "harness_list **page** (0-based) and **size** are mapped to offset/limit automatically. " +
-            "Use **compact: false** if you need full rule metadata on each list row.",
+            "List cost categories / business mappings — returns uuid, name, dataSources, and timestamps only (lightweight). " +
+            "Use harness_get with the uuid to load full rule details (costTargets, conditions, shared costs).",
         },
         get: {
           method: "GET",

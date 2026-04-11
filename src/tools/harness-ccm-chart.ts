@@ -1,9 +1,11 @@
 import * as z from "zod/v4";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Config } from "../config.js";
 import { chartResult, errorResult } from "../utils/response-formatter.js";
 import { normalizeCcmJsonToChartSpec } from "../utils/ccm-chart-spec.js";
-import { renderCcmChartPng } from "../utils/ccm-chart-png.js";
+import { renderCcmChartPng, CHART_SIZE_PRESETS, type ChartSize } from "../utils/ccm-chart-png.js";
 
 function clampSize(n: number | undefined, fallback: number, max: number, min: number): number {
   const v = n ?? fallback;
@@ -18,7 +20,7 @@ export function registerCcmChartTool(server: McpServer, config: Config): void {
     "harness_ccm_chart",
     {
       description:
-        "Render a PNG chart from JSON. Pass chart_spec: bar/line { kind, title?, y_label?, points: [{ label, value }] }, or grouped_bar { kind: \"grouped_bar\", series: [{ key, label, color? }], points: [{ label, values: { [key]: number } }] } for side-by-side bars (e.g. current vs previous period). Or pass ccm_json (string) from CCM/harness_list — labels sanitized. Local rendering only; returns image/png.",
+        "Render a PNG chart from JSON. Pass chart_spec: bar/line { kind, title?, y_label?, points: [{ label, value }] }, or grouped_bar { kind: \"grouped_bar\", series: [{ key, label, color? }], points: [{ label, values: { [key]: number } }] } for side-by-side bars (e.g. current vs previous period). Or pass ccm_json (string) from CCM/harness_list — labels sanitized. Local rendering only; returns image/png. Use chart_size to pick medium (960×540) or large (1920×1080).",
       inputSchema: {
         chart_spec: z
           .record(z.string(), z.unknown())
@@ -28,19 +30,30 @@ export function registerCcmChartTool(server: McpServer, config: Config): void {
           .string()
           .describe("Alternative: JSON string to normalize (same shapes as harness_ccm_json)")
           .optional(),
+        chart_size: z
+          .enum(["medium", "large"])
+          .describe("Chart size preset: medium (960×540) or large (1920×1080). Overrides width/height when set")
+          .optional(),
         width: z
           .number()
           .min(200)
           .max(4096)
-          .describe("Image width in pixels (clamped to HARNESS_CCM_CHART_MAX_WIDTH)")
+          .describe("Image width in pixels (ignored when chart_size is set)")
           .optional(),
         height: z
           .number()
           .min(120)
           .max(4096)
-          .describe("Image height in pixels (clamped to HARNESS_CCM_CHART_MAX_HEIGHT)")
+          .describe("Image height in pixels (ignored when chart_size is set)")
           .optional(),
         kind_hint: z.enum(["bar", "line"]).describe("When normalizing ambiguous JSON, prefer bar or line").optional(),
+        output_path: z
+          .string()
+          .describe(
+            "Optional workspace-relative or absolute path to save the PNG to disk (e.g. 'triage/assets/my-chart.png'). " +
+            "When set the file is written to disk AND returned inline.",
+          )
+          .optional(),
       },
       annotations: {
         title: "Render CCM chart PNG",
@@ -73,26 +86,42 @@ export function registerCcmChartTool(server: McpServer, config: Config): void {
       }
 
       const spec = normalized.spec;
-      const w = clampSize(args.width, 960, config.HARNESS_CCM_CHART_MAX_WIDTH, 200);
-      const h = clampSize(args.height, 540, config.HARNESS_CCM_CHART_MAX_HEIGHT, 120);
+      const preset = args.chart_size ? CHART_SIZE_PRESETS[args.chart_size as ChartSize] : undefined;
+      const w = preset
+        ? preset.width
+        : clampSize(args.width, 960, config.HARNESS_CCM_CHART_MAX_WIDTH, 200);
+      const h = preset
+        ? preset.height
+        : clampSize(args.height, 540, config.HARNESS_CCM_CHART_MAX_HEIGHT, 120);
+      const scale = preset?.scale ?? 1;
 
       let png: Buffer;
       try {
-        png = renderCcmChartPng(spec, { width: w, height: h });
+        png = renderCcmChartPng(spec, { width: w, height: h, scale });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return errorResult(`Chart render failed: ${msg}`);
       }
 
-      const summary = {
+      const summary: Record<string, unknown> = {
         ok: true,
         kind: spec.kind,
         title: spec.title,
         point_count: spec.points.length,
+        chart_size: args.chart_size ?? "medium",
         width_px: w,
         height_px: h,
         y_label: spec.y_label,
       };
+
+      if (args.output_path) {
+        const outPath = path.isAbsolute(args.output_path)
+          ? args.output_path
+          : path.resolve(process.cwd(), args.output_path);
+        fs.mkdirSync(path.dirname(outPath), { recursive: true });
+        fs.writeFileSync(outPath, png);
+        summary.saved_to = outPath;
+      }
 
       return chartResult(summary, png);
     },

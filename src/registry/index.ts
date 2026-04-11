@@ -290,12 +290,8 @@ export class Registry {
       }
     }
 
-    // SaaS CCM REST often expects routingId alongside accountIdentifier (same as account id)
-    if (
-      def.resourceType === "cost_category" &&
-      spec.method === "GET" &&
-      spec.path === "/ccm/api/business-mapping"
-    ) {
+    // SaaS CCM REST endpoints often expect routingId alongside accountIdentifier
+    if (def.toolset === "ccm" && spec.path.startsWith("/ccm/api/")) {
       params.routingId = this.config.HARNESS_ACCOUNT_ID;
     }
 
@@ -305,10 +301,21 @@ export class Registry {
     const needsBusinessMappingResolve =
       groupByNorm === "business_domain" || groupByNorm === "cost_category";
 
+    const hasCostCategoryFilter =
+      mergedInput.filter_cost_category_value !== undefined ||
+      mergedInput.filter_cost_category_values !== undefined;
+
+    const isCcmGraphQlResource =
+      def.resourceType === "cost_timeseries" ||
+      def.resourceType === "cost_breakdown" ||
+      def.resourceType === "cost_summary" ||
+      def.resourceType === "cost_anomaly" ||
+      def.resourceType === "cost_anomaly_summary";
+
     if (
-      (def.resourceType === "cost_timeseries" || def.resourceType === "cost_breakdown") &&
+      isCcmGraphQlResource &&
       spec.bodyBuilder &&
-      needsBusinessMappingResolve &&
+      (needsBusinessMappingResolve || hasCostCategoryFilter) &&
       !mergedInput.business_mapping_field_id
     ) {
       const mappingName =

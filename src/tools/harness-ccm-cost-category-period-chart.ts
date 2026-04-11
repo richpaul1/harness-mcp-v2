@@ -1,10 +1,12 @@
 import * as z from "zod/v4";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Registry } from "../registry/index.js";
 import type { HarnessClient } from "../client/harness-client.js";
 import type { Config } from "../config.js";
 import { chartResult, errorResult } from "../utils/response-formatter.js";
-import { renderCcmChartPng } from "../utils/ccm-chart-png.js";
+import { renderCcmChartPng, CHART_SIZE_PRESETS, type ChartSize } from "../utils/ccm-chart-png.js";
 import { computeTwoPeriodWindowsBeforeExcludedTail } from "../utils/ccm-period-windows.js";
 import { isRecord } from "../utils/type-guards.js";
 import { isUserError, isUserFixableApiError, toMcpError } from "../utils/errors.js";
@@ -42,11 +44,11 @@ export function registerCcmCostCategoryPeriodChartTool(
     "harness_ccm_cost_category_period_chart",
     {
       description:
-        "Compare total cost by **cost category** (business-mapping dimension) across two consecutive UTC windows. " +
-        "Calls cost_breakdown twice with group_by cost_category, resolving the mapping by name (same as harness_list cost_category). " +
+        "Render a grouped-bar PNG chart comparing cost by **cost category** across two consecutive UTC windows. " +
+        "Note: a single harness_list cost_breakdown call already returns both cost and costTrend (% change vs previous period) per row — use that for data-only comparisons. " +
+        "This tool adds a visual chart: it calls cost_breakdown twice with explicit time windows to get absolute dollar values for both periods, then renders current (green) vs previous (red) bars. " +
         "Current window: last N days ending before an excluded trailing tail (default exclude 2 calendar days). " +
-        "Previous window: the N days immediately before that. " +
-        "Chart: current period green, previous period red. Requires CCM toolset.",
+        "Previous window: the N days immediately before that. Requires CCM toolset.",
       inputSchema: {
         perspective_id: z.string().min(1).describe("Perspective UUID"),
         cost_category_name: z
@@ -76,8 +78,19 @@ export function registerCcmCostCategoryPeriodChartTool(
           .max(500)
           .describe("Max breakdown rows per API call (default 100)")
           .optional(),
-        width: z.number().min(400).max(4096).describe("PNG width (pixels)").optional(),
-        height: z.number().min(280).max(4096).describe("PNG height (pixels)").optional(),
+        chart_size: z
+          .enum(["medium", "large"])
+          .describe("Chart size preset: medium (1100×620) or large (2200×1240). Overrides width/height when set")
+          .optional(),
+        width: z.number().min(400).max(4096).describe("PNG width (pixels, ignored when chart_size is set)").optional(),
+        height: z.number().min(280).max(4096).describe("PNG height (pixels, ignored when chart_size is set)").optional(),
+        output_path: z
+          .string()
+          .describe(
+            "Optional workspace-relative or absolute path to save the PNG to disk. " +
+            "When set the file is written to disk AND returned inline.",
+          )
+          .optional(),
       },
       annotations: {
         title: "Cost category period comparison chart",
@@ -161,12 +174,24 @@ export function registerCcmCostCategoryPeriodChartTool(
           points,
         };
 
-        const w = clampSize(args.width, 1100, config.HARNESS_CCM_CHART_MAX_WIDTH, 400);
-        const h = clampSize(args.height, 620, config.HARNESS_CCM_CHART_MAX_HEIGHT, 280);
+        const preset = args.chart_size
+          ? {
+              width: CHART_SIZE_PRESETS[args.chart_size as ChartSize].scale * 1100,
+              height: CHART_SIZE_PRESETS[args.chart_size as ChartSize].scale * 620,
+              scale: CHART_SIZE_PRESETS[args.chart_size as ChartSize].scale,
+            }
+          : undefined;
+        const w = preset
+          ? preset.width
+          : clampSize(args.width, 1100, config.HARNESS_CCM_CHART_MAX_WIDTH, 400);
+        const h = preset
+          ? preset.height
+          : clampSize(args.height, 620, config.HARNESS_CCM_CHART_MAX_HEIGHT, 280);
+        const scale = preset?.scale ?? 1;
 
-        const png = renderCcmChartPng(spec, { width: w, height: h });
+        const png = renderCcmChartPng(spec, { width: w, height: h, scale });
 
-        const summary = {
+        const summary: Record<string, unknown> = {
           ok: true,
           kind: "grouped_bar",
           perspective_id: args.perspective_id,
@@ -178,9 +203,19 @@ export function registerCcmCostCategoryPeriodChartTool(
           current_legend: windows.currentLegend,
           previous_legend: windows.previousLegend,
           entity_count: points.length,
+          chart_size: args.chart_size ?? "medium",
           width_px: w,
           height_px: h,
         };
+
+        if (args.output_path) {
+          const outPath = path.isAbsolute(args.output_path)
+            ? args.output_path
+            : path.resolve(process.cwd(), args.output_path);
+          fs.mkdirSync(path.dirname(outPath), { recursive: true });
+          fs.writeFileSync(outPath, png);
+          summary.saved_to = outPath;
+        }
 
         return chartResult(summary, png);
       } catch (err) {

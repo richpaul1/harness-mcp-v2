@@ -34,10 +34,10 @@ const RawConfigSchema = z
   HARNESS_MAX_BODY_SIZE_MB: z.coerce.number().default(10),
   HARNESS_RATE_LIMIT_RPS: z.coerce.number().default(10),
   HARNESS_READ_ONLY: z.coerce.boolean().default(false),
-  /** Max width for harness_ccm_chart PNG output (pixels). */
-  HARNESS_CCM_CHART_MAX_WIDTH: z.coerce.number().min(200).max(4096).default(960),
-  /** Max height for harness_ccm_chart PNG output (pixels). */
-  HARNESS_CCM_CHART_MAX_HEIGHT: z.coerce.number().min(120).max(4096).default(540),
+  /** Max width for harness_ccm_chart PNG output (pixels). Must accommodate large preset (1920+). */
+  HARNESS_CCM_CHART_MAX_WIDTH: z.coerce.number().min(200).max(4096).default(2200),
+  /** Max height for harness_ccm_chart PNG output (pixels). Must accommodate large preset (1080+). */
+  HARNESS_CCM_CHART_MAX_HEIGHT: z.coerce.number().min(120).max(4096).default(1240),
   /** Max data points per chart (sanitized slice). */
   HARNESS_CCM_CHART_MAX_POINTS: z.coerce.number().min(1).max(500).default(120),
 })

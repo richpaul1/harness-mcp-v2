@@ -74,6 +74,25 @@ export const ccmBusinessMappingListExtract = (raw: unknown): { items: unknown[];
   return { items: [], total: 0 };
 };
 
+/**
+ * Lightweight cost category list — strips heavy rule payloads (costTargets, sharedCosts, etc.)
+ * and returns only summary fields. Use the get operation for full rule details.
+ */
+export const ccmBusinessMappingListCompactExtract = (raw: unknown): { items: unknown[]; total: number } => {
+  const full = ccmBusinessMappingListExtract(raw);
+  const compact = full.items.map((item) => {
+    if (!isRecord(item)) return item;
+    return {
+      uuid: item.uuid,
+      name: item.name,
+      dataSources: item.dataSources,
+      createdAt: item.createdAt,
+      lastUpdatedAt: item.lastUpdatedAt,
+    };
+  });
+  return { items: compact, total: full.total };
+};
+
 /** Pass-through extractor — returns raw response unchanged. Used for APIs that don't wrap in `data`. */
 export const passthrough = (raw: unknown): unknown => raw;
 
