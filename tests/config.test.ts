@@ -54,9 +54,21 @@ describe("ConfigSchema", () => {
     }
   });
 
-  it("fails when HARNESS_API_KEY is missing", () => {
+  it("fails when both HARNESS_API_KEY and HARNESS_BEARER_TOKEN are missing", () => {
     const result = ConfigSchema.safeParse({ HARNESS_ACCOUNT_ID: "acct123" });
     expect(result.success).toBe(false);
+  });
+
+  it("accepts HARNESS_BEARER_TOKEN without HARNESS_API_KEY when HARNESS_ACCOUNT_ID is set", () => {
+    const result = ConfigSchema.safeParse({
+      HARNESS_BEARER_TOKEN: "eyJhbGciOiJIUzI1NiJ9.fake",
+      HARNESS_ACCOUNT_ID: "acct123",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.HARNESS_API_KEY).toBeUndefined();
+      expect(result.data.HARNESS_BEARER_TOKEN).toBe("eyJhbGciOiJIUzI1NiJ9.fake");
+    }
   });
 
   it("HARNESS_ACCOUNT_ID is optional in schema", () => {
@@ -64,7 +76,7 @@ describe("ConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("fails when HARNESS_API_KEY is empty", () => {
+  it("fails when HARNESS_API_KEY is empty and no bearer token", () => {
     const result = ConfigSchema.safeParse({ HARNESS_API_KEY: "", HARNESS_ACCOUNT_ID: "acct" });
     expect(result.success).toBe(false);
   });
@@ -172,7 +184,15 @@ describe("loadConfig — account ID extraction", () => {
   it("throws when HARNESS_ACCOUNT_ID missing and API key is not a PAT", () => {
     withEnv({ HARNESS_API_KEY: "sat.notapat.tok.sec" }, () => {
       expect(() => loadConfig()).toThrow(
-        "HARNESS_ACCOUNT_ID is required when the API key is not a PAT",
+        "HARNESS_ACCOUNT_ID is required when HARNESS_API_KEY is missing or not a PAT",
+      );
+    });
+  });
+
+  it("throws when only HARNESS_BEARER_TOKEN is set without HARNESS_ACCOUNT_ID", () => {
+    withEnv({ HARNESS_BEARER_TOKEN: "eyJtoken" }, () => {
+      expect(() => loadConfig()).toThrow(
+        "HARNESS_ACCOUNT_ID is required when HARNESS_API_KEY is missing or not a PAT",
       );
     });
   });

@@ -1,0 +1,43 @@
+# AWS cost breakdown (last 7 days) — curl debug
+
+This is the same request the MCP server sends for harness_list(cost_breakdown, perspective_id=zdzSd41PQQa-ERSOwqLfSQ, time_filter=LAST_7, group_by=awsUsageAccountId).
+
+## 1. Replace API key and run from harness-mcp-v2/docs/
+
+  curl -sS -X POST 'https://app3.harness.io/gateway/ccm/api/graphql?accountIdentifier=HgTKqISVTX-kQSVsWCHEcA&routingId=HgTKqISVTX-kQSVsWCHEcA' \
+    -H 'Content-Type: application/json' \
+    -H 'x-api-key: YOUR_HARNESS_API_KEY' \
+    -H 'Harness-Account: HgTKqISVTX-kQSVsWCHEcA' \
+    -d @ccm-grid-request.json
+
+Replace YOUR_HARNESS_API_KEY with your PAT (or use the value from .env).
+
+## 2. Or use env var (no key in command)
+
+  export HARNESS_API_KEY='pat.your.account.token.secret'
+  curl -sS -X POST 'https://app3.harness.io/gateway/ccm/api/graphql?accountIdentifier=HgTKqISVTX-kQSVsWCHEcA&routingId=HgTKqISVTX-kQSVsWCHEcA' \
+    -H 'Content-Type: application/json' \
+    -H "x-api-key: $HARNESS_API_KEY" \
+    -H 'Harness-Account: HgTKqISVTX-kQSVsWCHEcA' \
+    -d @ccm-grid-request.json
+
+## 3. Time range in the request
+
+The body file uses fixed timestamps (from a UI capture):
+  AFTER:  1772668800000  (start of 7-day window)
+  BEFORE: 1773273599000  (end of 7-day window)
+
+If you see data in the UI for "Last 7 days", copy the exact timeFilter.value numbers from the UI's Network tab (request payload for FetchperspectiveGrid) into docs/ccm-grid-request.json to match. The MCP server computes LAST_7 from the current date (UTC), so if your machine date or timezone differs, the window may not match the UI.
+
+## 4. Compare with UI
+
+In Harness CCM, open the AWS perspective, set "Last 7 days", group by Account. Open DevTools → Network, trigger a refresh, find the request to graphql and compare:
+  - URL and query params (accountIdentifier)
+  - Headers (x-api-key, Harness-Account)
+  - Request payload (variables.filters, variables.groupBy, variables.preferences, useCostCategoryStampedData)
+
+## 5. Pretty-print response
+
+  curl ... -d @ccm-grid-request.json | jq .
+
+If you get data from curl but not from MCP, the difference is in how the server builds the request (e.g. time range or preferences). If curl also returns empty data, the issue is likely auth, account, or the same filters the UI uses.

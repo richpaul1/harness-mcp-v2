@@ -1,5 +1,6 @@
 import type { Config } from "../config.js";
 import type { HarnessClient } from "../client/harness-client.js";
+import { resolveBusinessMappingForGroupBy } from "./ccm-business-mapping-resolve.js";
 import type { ResourceDefinition, ToolsetDefinition, ToolsetName, OperationName, EndpointSpec, FilterFieldSpec } from "./types.js";
 import { createLogger } from "../utils/logger.js";
 import { buildDeepLink, appendStoreType } from "../utils/deep-links.js";
@@ -247,6 +248,38 @@ export class Registry {
       params.projectIdentifier = (input.project_id as string) ?? this.config.HARNESS_DEFAULT_PROJECT_ID;
     }
 
+    // CCM cost_category list: map harness_list page/size + defaults (matches CE UI query shape)
+    if (
+      def.resourceType === "cost_category" &&
+      spec.method === "GET" &&
+      spec.path === "/ccm/api/business-mapping" &&
+      spec.queryParams &&
+      "limit" in spec.queryParams
+    ) {
+      const li = input as Record<string, unknown>;
+      if (li.search_key === undefined && li.search_term !== undefined) {
+        li.search_key = li.search_term;
+      }
+      if (li.limit === undefined && li.size !== undefined) {
+        li.limit = Number(li.size);
+      }
+      if (li.limit === undefined) {
+        li.limit = 20;
+      }
+      if (li.offset === undefined && li.page !== undefined) {
+        li.offset = Number(li.page) * Number(li.limit);
+      }
+      if (li.offset === undefined) {
+        li.offset = 0;
+      }
+      if (li.sort_order === undefined) {
+        li.sort_order = "DESCENDING";
+      }
+      if (li.sort_type === undefined) {
+        li.sort_type = "LAST_EDIT";
+      }
+    }
+
     // Map input fields to query params
     if (spec.queryParams) {
       for (const [inputKey, queryKey] of Object.entries(spec.queryParams)) {
@@ -257,8 +290,56 @@ export class Registry {
       }
     }
 
+    // SaaS CCM REST often expects routingId alongside accountIdentifier (same as account id)
+    if (
+      def.resourceType === "cost_category" &&
+      spec.method === "GET" &&
+      spec.path === "/ccm/api/business-mapping"
+    ) {
+      params.routingId = this.config.HARNESS_ACCOUNT_ID;
+    }
+
+    let mergedInput: Record<string, unknown> = { ...input };
+    const groupByNorm =
+      typeof mergedInput.group_by === "string" ? mergedInput.group_by.trim().toLowerCase() : "";
+    const needsBusinessMappingResolve =
+      groupByNorm === "business_domain" || groupByNorm === "cost_category";
+
+    if (
+      (def.resourceType === "cost_timeseries" || def.resourceType === "cost_breakdown") &&
+      spec.bodyBuilder &&
+      needsBusinessMappingResolve &&
+      !mergedInput.business_mapping_field_id
+    ) {
+      const mappingName =
+        typeof mergedInput.business_mapping_name === "string" && mergedInput.business_mapping_name.trim() !== ""
+          ? mergedInput.business_mapping_name.trim()
+          : "Business Domains";
+      const resolved = await resolveBusinessMappingForGroupBy(
+        client,
+        this.config.HARNESS_ACCOUNT_ID,
+        mappingName,
+        signal,
+      );
+      mergedInput.business_mapping_field_id = resolved.fieldId;
+      mergedInput.business_mapping_field_name = resolved.fieldName;
+    }
+
+    if (
+      typeof mergedInput.business_mapping_field_id === "string" &&
+      mergedInput.business_mapping_field_id.trim() !== "" &&
+      (mergedInput.business_mapping_field_name === undefined ||
+        String(mergedInput.business_mapping_field_name).trim() === "")
+    ) {
+      const fromMappingName =
+        typeof mergedInput.business_mapping_name === "string" && mergedInput.business_mapping_name.trim() !== ""
+          ? mergedInput.business_mapping_name.trim()
+          : "Cost category";
+      mergedInput.business_mapping_field_name = fromMappingName;
+    }
+
     // Build body
-    const body = spec.bodyBuilder ? spec.bodyBuilder(input) : undefined;
+    const body = spec.bodyBuilder ? spec.bodyBuilder(mergedInput) : undefined;
 
     // Validate required fields if bodySchema is defined.
     // When bodyWrapperKey is set, the bodyBuilder wraps user fields inside that

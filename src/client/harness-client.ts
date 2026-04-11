@@ -21,7 +21,7 @@ function humanizeHttpError(status: number, rawBody: string): string {
 
   switch (status) {
     case 401:
-      return `HTTP 401 Unauthorized — API key is invalid or expired. Verify HARNESS_API_KEY is a valid PAT or Service Account token.${hint ? ` (${hint})` : ""}`;
+      return `HTTP 401 Unauthorized — invalid or expired credentials. For most APIs use HARNESS_API_KEY (PAT/SA). For CCM with a session JWT, set HARNESS_BEARER_TOKEN (CCM paths only).${hint ? ` (${hint})` : ""}`;
     case 403:
       return `HTTP 403 Forbidden — access denied. Possible causes: wrong HARNESS_ACCOUNT_ID, IP restrictions, missing RBAC permissions, or corporate proxy/WAF blocking the request.${hint ? ` (${hint})` : ""}`;
     case 404:
@@ -31,9 +31,65 @@ function humanizeHttpError(status: number, rawBody: string): string {
   }
 }
 
+const MAX_TIMEOUT_LOG_BODY = 12_000;
+const MAX_TIMEOUT_LOG_GRAPHQL = 16_000;
+const MAX_TIMEOUT_LOG_VARS = 4_000;
+
+/**
+ * Request snapshot for timeout / exhausted-retry logs: path, params, and body or GraphQL query (truncated).
+ * Does not include auth headers or API keys.
+ */
+function summarizeRequestForTimeoutLog(options: RequestOptions, timeoutMs: number): Record<string, unknown> {
+  const method = options.method ?? "GET";
+  const path = options.path;
+  const snapshot: Record<string, unknown> = {
+    method,
+    path,
+    timeoutMs,
+  };
+
+  if (options.params && Object.keys(options.params).length > 0) {
+    snapshot.queryParams = JSON.stringify(options.params).slice(0, 4000);
+  }
+
+  if (options.body === undefined || options.body === null) {
+    return snapshot;
+  }
+
+  if (
+    typeof options.body === "object" &&
+    !Array.isArray(options.body) &&
+    typeof (options.body as { query?: unknown }).query === "string"
+  ) {
+    const b = options.body as { query: string; variables?: unknown };
+    const graphql: Record<string, unknown> = {
+      queryLength: b.query.length,
+      query:
+        b.query.length > MAX_TIMEOUT_LOG_GRAPHQL
+          ? `${b.query.slice(0, MAX_TIMEOUT_LOG_GRAPHQL)}...(truncated)`
+          : b.query,
+    };
+    if (b.variables !== undefined) {
+      const vars = JSON.stringify(b.variables);
+      graphql.variablesLength = vars.length;
+      graphql.variables =
+        vars.length > MAX_TIMEOUT_LOG_VARS ? `${vars.slice(0, MAX_TIMEOUT_LOG_VARS)}...(truncated)` : vars;
+    }
+    snapshot.graphql = graphql;
+    return snapshot;
+  }
+
+  const raw = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
+  snapshot.bodyLength = raw.length;
+  snapshot.bodyPreview =
+    raw.length > MAX_TIMEOUT_LOG_BODY ? `${raw.slice(0, MAX_TIMEOUT_LOG_BODY)}...(truncated)` : raw;
+  return snapshot;
+}
+
 export class HarnessClient {
   private readonly baseUrl: string;
-  private readonly token: string;
+  private readonly apiKey: string | undefined;
+  private readonly bearerToken: string | undefined;
   private readonly accountId: string;
   private readonly timeout: number;
   private readonly maxRetries: number;
@@ -41,7 +97,8 @@ export class HarnessClient {
 
   constructor(config: Config) {
     this.baseUrl = config.HARNESS_BASE_URL.replace(/\/$/, "");
-    this.token = config.HARNESS_API_KEY;
+    this.apiKey = config.HARNESS_API_KEY;
+    this.bearerToken = config.HARNESS_BEARER_TOKEN;
     this.accountId = config.HARNESS_ACCOUNT_ID;
     this.timeout = config.HARNESS_API_TIMEOUT_MS;
     this.maxRetries = config.HARNESS_MAX_RETRIES;
@@ -56,12 +113,26 @@ export class HarnessClient {
     await this.rateLimiter.acquire();
 
     const method = options.method ?? "GET";
+    const path = options.path;
+    const requestWallStart = performance.now();
     const url = this.buildUrl(options);
     const headers: Record<string, string> = {
-      "x-api-key": this.token,
       "Harness-Account": this.accountId,
       ...options.headers,
     };
+
+    const ccmPath = options.path.includes("/ccm/");
+    if (ccmPath && this.bearerToken) {
+      headers["Authorization"] = `Bearer ${this.bearerToken}`;
+    } else {
+      if (!this.apiKey) {
+        throw new HarnessApiError(
+          "HARNESS_API_KEY is required for non-CCM requests. CCM paths can use HARNESS_BEARER_TOKEN instead.",
+          400,
+        );
+      }
+      headers["x-api-key"] = this.apiKey;
+    }
 
     if (options.body) {
       if (typeof options.body === "string") {
@@ -80,6 +151,8 @@ export class HarnessClient {
         await new Promise((r) => setTimeout(r, backoff));
       }
 
+      const attemptStart = performance.now();
+
       try {
         // Check if already aborted before starting the request
         if (options.signal?.aborted) {
@@ -96,6 +169,7 @@ export class HarnessClient {
         const bodyString = options.body
           ? (typeof options.body === "string" ? options.body : JSON.stringify(options.body))
           : undefined;
+        const requestBodyBytes = bodyString?.length ?? 0;
 
         log.debug(`${method} ${url}`);
         if (bodyString) {
@@ -110,6 +184,9 @@ export class HarnessClient {
         });
 
         clearTimeout(timer);
+
+        const attemptDurationMs = Math.round(performance.now() - attemptStart);
+        const totalDurationMs = Math.round(performance.now() - requestWallStart);
 
         if (!response.ok) {
           const body = await response.text();
@@ -129,7 +206,21 @@ export class HarnessClient {
             parsed.correlationId,
           );
 
-          if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < this.maxRetries) {
+          const willRetry = RETRYABLE_STATUS_CODES.has(response.status) && attempt < this.maxRetries;
+          log.info("Harness API response", {
+            outcome: willRetry ? "http_error_will_retry" : "http_error",
+            method,
+            path,
+            httpStatus: response.status,
+            attemptDurationMs,
+            totalDurationMs,
+            attempt: attempt + 1,
+            maxAttempts: this.maxRetries + 1,
+            responseBytes: body.length,
+            requestBodyBytes,
+          });
+
+          if (willRetry) {
             lastError = error;
             continue;
           }
@@ -138,9 +229,23 @@ export class HarnessClient {
         }
 
         const text = await response.text();
+        const readDurationMs = Math.round(performance.now() - attemptStart);
+        const totalMsAfterRead = Math.round(performance.now() - requestWallStart);
+
         if (!text) {
+          log.info("Harness API response", {
+            outcome: "error",
+            reason: "empty_body",
+            method,
+            path,
+            attemptDurationMs: readDurationMs,
+            totalDurationMs: totalMsAfterRead,
+            attempt: attempt + 1,
+            responseBytes: 0,
+            requestBodyBytes,
+          });
           throw new HarnessApiError(
-            `Empty response body from ${method} ${options.path}`,
+            `Empty response body from ${method} ${path}`,
             502,
           );
         }
@@ -148,28 +253,85 @@ export class HarnessClient {
         try {
           data = JSON.parse(text);
         } catch (parseErr) {
+          log.info("Harness API response", {
+            outcome: "error",
+            reason: "invalid_json",
+            method,
+            path,
+            attemptDurationMs: readDurationMs,
+            totalDurationMs: totalMsAfterRead,
+            attempt: attempt + 1,
+            responseBytes: text.length,
+            requestBodyBytes,
+          });
           throw new HarnessApiError(
-            `Non-JSON response from ${method} ${options.path}: ${text.slice(0, 200)}`,
+            `Non-JSON response from ${method} ${path}: ${text.slice(0, 200)}`,
             502,
             undefined,
             undefined,
             parseErr,
           );
         }
+
+        log.info("Harness API response", {
+          outcome: "success",
+          method,
+          path,
+          attemptDurationMs: readDurationMs,
+          totalDurationMs: totalMsAfterRead,
+          attempt: attempt + 1,
+          responseBytes: text.length,
+          requestBodyBytes,
+        });
         log.debug("Response body", { body: text.slice(0, 1000) });
         return data as T;
       } catch (err) {
         if (err instanceof HarnessApiError) throw err;
         if (err instanceof Error && err.name === "AbortError") {
+          const attemptDurationMs = Math.round(performance.now() - attemptStart);
+          const totalDurationMs = Math.round(performance.now() - requestWallStart);
           // External signal (client disconnect) — stop immediately, don't retry
           if (options.signal?.aborted) {
+            log.info("Harness API response", {
+              outcome: "error",
+              reason: "aborted",
+              method,
+              path,
+              attemptDurationMs,
+              totalDurationMs,
+              attempt: attempt + 1,
+            });
             throw new HarnessApiError("Request cancelled", 499, undefined, undefined, err);
           }
           // Timeout — retry if allowed
           lastError = new HarnessApiError("Request timed out", 408, undefined, undefined, err);
-          if (attempt < this.maxRetries) continue;
+          const willRetryTimeout = attempt < this.maxRetries;
+          log.warn("Harness API request timed out", {
+            outcome: willRetryTimeout ? "timeout_will_retry" : "timeout",
+            ...summarizeRequestForTimeoutLog(options, this.timeout),
+            attemptDurationMs,
+            totalDurationMs,
+            attempt: attempt + 1,
+            maxAttempts: this.maxRetries + 1,
+            willRetry: willRetryTimeout,
+          });
+          if (willRetryTimeout) {
+            continue;
+          }
           throw lastError;
         }
+        const attemptDurationMs = Math.round(performance.now() - attemptStart);
+        const totalDurationMs = Math.round(performance.now() - requestWallStart);
+        log.info("Harness API response", {
+          outcome: "error",
+          reason: "network_or_unknown",
+          method,
+          path,
+          attemptDurationMs,
+          totalDurationMs,
+          attempt: attempt + 1,
+          error: (err as Error).message ?? String(err),
+        });
         throw new HarnessApiError(
           `Request failed: ${(err as Error).message ?? String(err)}`,
           502,
@@ -180,6 +342,16 @@ export class HarnessClient {
       }
     }
 
+    const totalDurationMs = Math.round(performance.now() - requestWallStart);
+    log.info("Harness API response", {
+      outcome: "error",
+      reason: "max_retries",
+      method,
+      path,
+      totalDurationMs,
+      maxAttempts: this.maxRetries + 1,
+      ...summarizeRequestForTimeoutLog(options, this.timeout),
+    });
     throw lastError ?? new HarnessApiError("Max retries exceeded", 500);
   }
 

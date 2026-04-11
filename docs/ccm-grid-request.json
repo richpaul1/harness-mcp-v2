@@ -1,0 +1,32 @@
+{
+  "query": "query FetchperspectiveGrid($filters: [QLCEViewFilterWrapperInput], $groupBy: [QLCEViewGroupByInput], $limit: Int, $offset: Int, $aggregateFunction: [QLCEViewAggregationInput], $isClusterOnly: Boolean!, $isClusterHourlyData: Boolean = null, $preferences: ViewPreferencesInput, $useCostCategoryStampedData: Boolean = false) { perspectiveGrid(aggregateFunction: $aggregateFunction filters: $filters groupBy: $groupBy limit: $limit offset: $offset preferences: $preferences isClusterHourlyData: $isClusterHourlyData sortCriteria: [{sortType: COST, sortOrder: DESCENDING}] useCostCategoryStampedData: $useCostCategoryStampedData) { data { name id cost costTrend __typename } __typename } perspectiveTotalCount(filters: $filters groupBy: $groupBy isClusterQuery: $isClusterOnly isClusterHourlyData: $isClusterHourlyData useCostCategoryStampedData: $useCostCategoryStampedData) }",
+  "operationName": "FetchperspectiveGrid",
+  "variables": {
+    "aggregateFunction": [{"operationType": "SUM", "columnName": "cost"}],
+    "filters": [
+      {"viewMetadataFilter": {"viewId": "zdzSd41PQQa-ERSOwqLfSQ", "isPreview": false}},
+      {"timeFilter": {"field": {"fieldId": "startTime", "fieldName": "startTime", "identifier": "COMMON"}, "operator": "AFTER", "value": 1772668800000}},
+      {"timeFilter": {"field": {"fieldId": "startTime", "fieldName": "startTime", "identifier": "COMMON"}, "operator": "BEFORE", "value": 1773273599000}}
+    ],
+    "isClusterOnly": false,
+    "isClusterHourlyData": false,
+    "limit": 15,
+    "offset": 0,
+    "groupBy": [{"entityGroupBy": {"fieldId": "awsUsageAccountId", "fieldName": "Account", "identifier": "AWS", "identifierName": "AWS"}}],
+    "preferences": {
+      "includeOthers": false,
+      "includeUnallocatedCost": false,
+      "awsPreferences": {
+        "includeDiscounts": false,
+        "includeCredits": true,
+        "includeRefunds": true,
+        "includeTaxes": true,
+        "awsCost": "NET_AMORTISED"
+      },
+      "gcpPreferences": null,
+      "azureViewPreferences": null,
+      "showAnomalies": true
+    },
+    "useCostCategoryStampedData": true
+  }
+}

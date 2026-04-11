@@ -16,6 +16,15 @@ import { parseArgs } from "./utils/cli.js";
 
 const log = createLogger("main");
 
+/** Extract JSON-RPC `method` from an MCP POST body for observability (no secrets). */
+function mcpJsonRpcMethodFromBody(body: unknown): string | undefined {
+  if (body && typeof body === "object" && "method" in body) {
+    const m = (body as { method?: unknown }).method;
+    if (typeof m === "string") return m;
+  }
+  return undefined;
+}
+
 /**
  * Create a fully-configured MCP server instance with all tools, resources, and prompts.
  */
@@ -177,6 +186,8 @@ async function startHttp(config: Config, port: number): Promise<void> {
         return;
       }
       session.lastActivity = Date.now();
+      const httpStart = performance.now();
+      const rpcMethod = mcpJsonRpcMethodFromBody(req.body);
       try {
         await session.transport.handleRequest(req, res, req.body);
       } catch (err) {
@@ -188,6 +199,13 @@ async function startHttp(config: Config, port: number): Promise<void> {
             id: null,
           });
         }
+      } finally {
+        log.info("MCP HTTP request", {
+          durationMs: Math.round(performance.now() - httpStart),
+          route: "POST /mcp",
+          jsonrpcMethod: rpcMethod ?? "(none)",
+          sessionId,
+        });
       }
       return;
     }
@@ -195,6 +213,8 @@ async function startHttp(config: Config, port: number): Promise<void> {
     // No session header — must be an initialize request. Create a new session.
     let server: McpServer | undefined;
     let transport: StreamableHTTPServerTransport | undefined;
+    const initHttpStart = performance.now();
+    const initRpcMethod = mcpJsonRpcMethodFromBody(req.body);
     try {
       server = createHarnessServer(config);
       transport = new StreamableHTTPServerTransport({
@@ -224,6 +244,13 @@ async function startHttp(config: Config, port: number): Promise<void> {
       }
       await transport?.close();
       await server?.close();
+    } finally {
+      log.info("MCP HTTP request", {
+        durationMs: Math.round(performance.now() - initHttpStart),
+        route: "POST /mcp",
+        jsonrpcMethod: initRpcMethod ?? "(none)",
+        sessionId: "initialize",
+      });
     }
   });
 
@@ -250,6 +277,7 @@ async function startHttp(config: Config, port: number): Promise<void> {
     }
 
     session.lastActivity = Date.now();
+    const sseStart = performance.now();
     try {
       await session.transport.handleRequest(req, res);
     } catch (err) {
@@ -261,6 +289,13 @@ async function startHttp(config: Config, port: number): Promise<void> {
           id: null,
         });
       }
+    } finally {
+      log.info("MCP HTTP request", {
+        durationMs: Math.round(performance.now() - sseStart),
+        route: "GET /mcp",
+        jsonrpcMethod: "sse",
+        sessionId,
+      });
     }
   });
 
@@ -286,10 +321,19 @@ async function startHttp(config: Config, port: number): Promise<void> {
       return;
     }
 
+    const delStart = performance.now();
+    const delRpcMethod = mcpJsonRpcMethodFromBody(req.body);
     try {
       await session.transport.handleRequest(req, res);
     } catch (err) {
       log.error("Error handling DELETE request", { sessionId, error: String(err) });
+    } finally {
+      log.info("MCP HTTP request", {
+        durationMs: Math.round(performance.now() - delStart),
+        route: "DELETE /mcp",
+        jsonrpcMethod: delRpcMethod ?? "session_close",
+        sessionId,
+      });
     }
     destroySession(sessionId);
   });

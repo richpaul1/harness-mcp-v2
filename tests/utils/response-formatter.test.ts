@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { jsonResult, errorResult } from "../../src/utils/response-formatter.js";
+import { jsonResult, errorResult, chartResult } from "../../src/utils/response-formatter.js";
 
 describe("jsonResult", () => {
   it("wraps data as text content", () => {
@@ -43,5 +43,19 @@ describe("errorResult", () => {
     const result = errorResult("not found");
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed).toEqual({ error: "not found" });
+  });
+});
+
+describe("chartResult", () => {
+  it("returns text summary and base64 PNG", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const result = chartResult({ ok: true, point_count: 2 }, png);
+    expect(result.content).toHaveLength(2);
+    expect(result.content[0].type).toBe("text");
+    expect(result.content[1]).toEqual({
+      type: "image",
+      data: png.toString("base64"),
+      mimeType: "image/png",
+    });
   });
 });

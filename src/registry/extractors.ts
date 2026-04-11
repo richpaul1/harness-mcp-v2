@@ -19,6 +19,61 @@ export const pageExtract = (raw: unknown): { items: unknown[]; total: number } =
   };
 };
 
+/** Known list keys on CCM / NG business-mapping payloads */
+const BUSINESS_MAPPING_LIST_KEYS = [
+  "content",
+  "businessMappingDTOList",
+  "businessMappingList",
+  "businessMappings",
+  "list",
+] as const;
+
+function totalFromRecord(rec: Record<string, unknown>, itemsLen: number): number {
+  for (const k of ["totalElements", "total", "totalRecords", "totalCount"] as const) {
+    const v = rec[k];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return itemsLen;
+}
+
+function pickListFromRecord(obj: Record<string, unknown>): { items: unknown[]; total: number } | null {
+  for (const key of BUSINESS_MAPPING_LIST_KEYS) {
+    const v = obj[key];
+    if (Array.isArray(v)) {
+      return { items: v, total: totalFromRecord(obj, v.length) };
+    }
+  }
+  return null;
+}
+
+/**
+ * CCM cost categories / business-mapping list — response shape varies by cluster/version.
+ * Tries `data.content`, `resource.content`, DTO list keys, and bare arrays.
+ */
+export const ccmBusinessMappingListExtract = (raw: unknown): { items: unknown[]; total: number } => {
+  const paged = pageExtract(raw);
+  if (paged.items.length > 0 || paged.total > 0) return paged;
+  if (!isRecord(raw)) return { items: [], total: 0 };
+
+  for (const wrapKey of ["data", "resource", "response"] as const) {
+    const inner = raw[wrapKey];
+    if (inner === undefined) continue;
+    if (Array.isArray(inner)) return { items: inner, total: inner.length };
+    if (isRecord(inner)) {
+      const picked = pickListFromRecord(inner);
+      if (picked) return picked;
+    }
+  }
+
+  const d = raw.data;
+  if (Array.isArray(d)) return { items: d, total: d.length };
+
+  const top = pickListFromRecord(raw);
+  if (top) return top;
+
+  return { items: [], total: 0 };
+};
+
 /** Pass-through extractor — returns raw response unchanged. Used for APIs that don't wrap in `data`. */
 export const passthrough = (raw: unknown): unknown => raw;
 

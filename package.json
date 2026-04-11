@@ -1,7 +1,7 @@
 {
   "name": "harness-mcp-v2",
   "version": "0.6.2",
-  "description": "Give AI agents full access to the Harness.io platform — manage pipelines, deployments, feature flags, infrastructure, and 122+ resource types through 10 MCP tools",
+  "description": "Give AI agents full access to the Harness.io platform — manage pipelines, deployments, feature flags, infrastructure, and 122+ resource types through 12 MCP tools",
   "type": "module",
   "main": "build/index.js",
   "bin": {
@@ -12,7 +12,9 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
+    "dev": "npm run build && concurrently \"npm:dev:watch\" \"npm:dev:serve\"",
+    "dev:watch": "tsc --watch",
+    "dev:serve": "nodemon --watch build --ext js --delay 1 --exec \"node --env-file=.env build/index.js http\"",
     "start": "node build/index.js stdio",
     "start:http": "node build/index.js http",
     "inspect": "npx @modelcontextprotocol/inspector node build/index.js stdio",
@@ -43,6 +45,7 @@
   "homepage": "https://github.com/thisrohangupta/harness-mcp-v2#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@napi-rs/canvas": "^0.1.97",
     "express": "^5.2.1",
     "yaml": "^2.8.2",
     "zod": "^4.0.0"
@@ -50,6 +53,8 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^22.13.5",
+    "concurrently": "^9.1.2",
+    "nodemon": "^3.1.9",
     "typescript": "^5.7.3",
     "vitest": "^3.0.6"
   },

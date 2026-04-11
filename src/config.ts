@@ -14,8 +14,15 @@ export function extractAccountIdFromToken(apiKey: string): string | undefined {
   return undefined;
 }
 
-const RawConfigSchema = z.object({
-  HARNESS_API_KEY: z.string().min(1, "HARNESS_API_KEY is required"),
+const RawConfigSchema = z
+  .object({
+  /** PAT / service account token for most Harness APIs (`x-api-key`). */
+  HARNESS_API_KEY: z.string().optional(),
+  /**
+   * Browser/session JWT for CCM only. When set, requests to `/ccm/*` use
+   * `Authorization: Bearer …` instead of `x-api-key`. Prefer PAT for automation.
+   */
+  HARNESS_BEARER_TOKEN: z.string().optional(),
   HARNESS_ACCOUNT_ID: z.string().optional(),
   HARNESS_BASE_URL: z.string().url().default("https://app.harness.io"),
   HARNESS_DEFAULT_ORG_ID: z.string().default("default"),
@@ -27,16 +34,36 @@ const RawConfigSchema = z.object({
   HARNESS_MAX_BODY_SIZE_MB: z.coerce.number().default(10),
   HARNESS_RATE_LIMIT_RPS: z.coerce.number().default(10),
   HARNESS_READ_ONLY: z.coerce.boolean().default(false),
-});
+  /** Max width for harness_ccm_chart PNG output (pixels). */
+  HARNESS_CCM_CHART_MAX_WIDTH: z.coerce.number().min(200).max(4096).default(960),
+  /** Max height for harness_ccm_chart PNG output (pixels). */
+  HARNESS_CCM_CHART_MAX_HEIGHT: z.coerce.number().min(120).max(4096).default(540),
+  /** Max data points per chart (sanitized slice). */
+  HARNESS_CCM_CHART_MAX_POINTS: z.coerce.number().min(1).max(500).default(120),
+})
+  .superRefine((data, ctx) => {
+    const hasKey = Boolean(data.HARNESS_API_KEY?.trim());
+    const hasBearer = Boolean(data.HARNESS_BEARER_TOKEN?.trim());
+    if (!hasKey && !hasBearer) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Either HARNESS_API_KEY or HARNESS_BEARER_TOKEN is required",
+        path: ["HARNESS_API_KEY"],
+      });
+    }
+  });
 
 export const ConfigSchema = RawConfigSchema.transform((data) => {
-  const accountId = data.HARNESS_ACCOUNT_ID ?? extractAccountIdFromToken(data.HARNESS_API_KEY);
+  const apiKey = data.HARNESS_API_KEY?.trim() || undefined;
+  const bearerToken = data.HARNESS_BEARER_TOKEN?.trim() || undefined;
+  const accountId =
+    data.HARNESS_ACCOUNT_ID?.trim() || (apiKey ? extractAccountIdFromToken(apiKey) : undefined);
   if (!accountId) {
     throw new Error(
-      "HARNESS_ACCOUNT_ID is required when the API key is not a PAT (pat.<accountId>.<tokenId>.<secret>)",
+      "HARNESS_ACCOUNT_ID is required when HARNESS_API_KEY is missing or not a PAT (pat.<accountId>.<tokenId>.<secret>). Set it explicitly when using HARNESS_BEARER_TOKEN only.",
     );
   }
-  return { ...data, HARNESS_ACCOUNT_ID: accountId };
+  return { ...data, HARNESS_API_KEY: apiKey, HARNESS_BEARER_TOKEN: bearerToken, HARNESS_ACCOUNT_ID: accountId };
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
