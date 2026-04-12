@@ -397,25 +397,69 @@ function drawBarLabels(
   if (n === 0) return;
 
   ctx.fillStyle = TEXT_SECONDARY;
-  ctx.font = `${11 * s}px sans-serif`;
-  ctx.textAlign = "center";
+  const fontSize = 11 * s;
+  ctx.font = `${fontSize}px sans-serif`;
 
   const slotWidth = bw + gap;
   const maxLab = Math.max(6, Math.floor(520 / Math.max(n, 1)));
 
-  // Measure a representative label to decide how many to skip
   const sampleLabel = points[0]!.label.slice(0, maxLab);
   const labelWidth = ctx.measureText(sampleLabel).width + 8 * s;
-  const showEvery = labelWidth > slotWidth ? Math.ceil(labelWidth / slotWidth) : 1;
+  const fitsHorizontal = labelWidth <= slotWidth;
+
+  if (n <= 20) {
+    if (fitsHorizontal) {
+      ctx.textAlign = "center";
+      for (let i = 0; i < n; i++) {
+        const p = points[i]!;
+        const x = x0 + gap + i * (bw + gap) + bw / 2;
+        const lab = p.label.length > maxLab ? `${p.label.slice(0, maxLab - 1)}…` : p.label;
+        ctx.fillText(lab, x, y0 + 18 * s);
+      }
+      ctx.textAlign = "start";
+    } else {
+      drawDiagonalBarLabels(ctx, points, x0, y0, gap, bw, maxLab, s);
+    }
+  } else {
+    drawDiagonalBarLabels(ctx, points, x0, y0, gap, bw, maxLab, s);
+  }
+}
+
+function drawDiagonalBarLabels(
+  ctx: SKRSContext2D,
+  points: { label: string }[],
+  x0: number,
+  y0: number,
+  gap: number,
+  bw: number,
+  maxLab: number,
+  s: number,
+): void {
+  const n = points.length;
+  const angle = -Math.PI / 5; // ~36 degrees
+  const fontSize = 11 * s;
+  ctx.font = `${fontSize}px sans-serif`;
+  ctx.fillStyle = TEXT_SECONDARY;
+
+  const cosA = Math.cos(-angle);
+  const rotatedLabelWidth = ctx.measureText(points[0]!.label.slice(0, maxLab)).width * cosA + 4 * s;
+  const slotWidth = bw + gap;
+  const showEvery = n > 20 && rotatedLabelWidth > slotWidth
+    ? Math.ceil(rotatedLabelWidth / slotWidth)
+    : 1;
 
   for (let i = 0; i < n; i++) {
     if (showEvery > 1 && i % showEvery !== 0 && i !== n - 1) continue;
     const p = points[i]!;
     const x = x0 + gap + i * (bw + gap) + bw / 2;
     const lab = p.label.length > maxLab ? `${p.label.slice(0, maxLab - 1)}…` : p.label;
-    ctx.fillText(lab, x, y0 + 18 * s);
+    ctx.save();
+    ctx.translate(x, y0 + 12 * s);
+    ctx.rotate(angle);
+    ctx.textAlign = "right";
+    ctx.fillText(lab, 0, 0);
+    ctx.restore();
   }
-  ctx.textAlign = "start";
 }
 
 function drawLineLabels(
@@ -431,21 +475,67 @@ function drawLineLabels(
   if (n === 0) return;
 
   ctx.fillStyle = TEXT_SECONDARY;
-  ctx.font = `${11 * s}px sans-serif`;
-  ctx.textAlign = "center";
+  const fontSize = 11 * s;
+  ctx.font = `${fontSize}px sans-serif`;
 
-  const sampleLabel = points[0]!.label.slice(0, 12);
+  const maxLab = 12;
+  const sampleLabel = points[0]!.label.slice(0, maxLab);
   const labelWidth = ctx.measureText(sampleLabel).width + 8 * s;
   const slotWidth = n > 1 ? step : plotW;
-  const showEvery = labelWidth > slotWidth ? Math.ceil(labelWidth / slotWidth) : 1;
+  const fitsHorizontal = labelWidth <= slotWidth;
+
+  if (n <= 20) {
+    if (fitsHorizontal) {
+      ctx.textAlign = "center";
+      for (let i = 0; i < n; i++) {
+        const p = points[i];
+        if (!p) continue;
+        const x = n === 1 ? x0 + plotW / 2 : x0 + i * step;
+        const lab = p.label.length > maxLab ? `${p.label.slice(0, maxLab - 1)}…` : p.label;
+        ctx.fillText(lab, x, y0 + 18 * s);
+      }
+      ctx.textAlign = "start";
+    } else {
+      drawDiagonalLineLabels(ctx, points, x0, y0, step, n, plotW, maxLab, s);
+    }
+  } else {
+    drawDiagonalLineLabels(ctx, points, x0, y0, step, n, plotW, maxLab, s);
+  }
+}
+
+function drawDiagonalLineLabels(
+  ctx: SKRSContext2D,
+  points: { label: string }[],
+  x0: number,
+  y0: number,
+  step: number,
+  n: number,
+  plotW: number,
+  maxLab: number,
+  s: number,
+): void {
+  const angle = -Math.PI / 5;
+  ctx.font = `${11 * s}px sans-serif`;
+  ctx.fillStyle = TEXT_SECONDARY;
+
+  const cosA = Math.cos(-angle);
+  const rotatedLabelWidth = ctx.measureText(points[0]!.label.slice(0, maxLab)).width * cosA + 4 * s;
+  const slotWidth = n > 1 ? step : plotW;
+  const showEvery = n > 20 && rotatedLabelWidth > slotWidth
+    ? Math.ceil(rotatedLabelWidth / slotWidth)
+    : 1;
 
   for (let i = 0; i < n; i++) {
     if (showEvery > 1 && i % showEvery !== 0 && i !== n - 1) continue;
     const p = points[i];
     if (!p) continue;
     const x = n === 1 ? x0 + plotW / 2 : x0 + i * step;
-    const lab = p.label.length > 12 ? `${p.label.slice(0, 10)}…` : p.label;
-    ctx.fillText(lab, x, y0 + 18 * s);
+    const lab = p.label.length > maxLab ? `${p.label.slice(0, maxLab - 1)}…` : p.label;
+    ctx.save();
+    ctx.translate(x, y0 + 12 * s);
+    ctx.rotate(angle);
+    ctx.textAlign = "right";
+    ctx.fillText(lab, 0, 0);
+    ctx.restore();
   }
-  ctx.textAlign = "start";
 }

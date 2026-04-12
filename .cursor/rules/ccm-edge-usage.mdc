@@ -1,5 +1,5 @@
 ---
-description: CCM via ccm-edge MCP — perspectives, cost categories, breakdown, anomalies, charts, spike triage
+description: CCM via ccm-edge MCP — perspectives, cost categories, breakdown, anomalies, recommendations, charts, spike triage
 alwaysApply: true
 ---
 
@@ -67,6 +67,7 @@ If the user asks for **Usage only** (run-rate / usage-based cost):
 4. **Inline first:** The tool returns `image/png` — present it so the user sees the chart directly in the chat. This is the primary output.
 5. **Save to disk:** Use `output_path: "triage/assets/<filename>.png"` when creating markdown reports — saves AND returns inline in the same call. Do not write PNGs to disk unless creating a report or the user explicitly asks.
 6. **No chart-less responses:** If you have cost data, you have a chart. Period.
+7. **X-axis labels:** All labels are shown for datasets with 20 or fewer items — never skipped. If labels are too wide for horizontal placement, they render at a diagonal angle. For datasets with 20+ items, diagonal labels are used with minimal thinning only if overlap is unavoidable.
 
 ---
 
@@ -203,7 +204,149 @@ Returns: full anomaly record including `dailyBreakdown`, expected cost bounds, `
 
 ---
 
-## 7. Available group_by dimensions
+## 7. Cost recommendations — two-step pattern
+
+Use this when the user asks about **recommendations**, **savings opportunities**, **right-sizing**, **optimization**, or **what can we save**.
+
+| Step | Operation | Tool | Purpose |
+|------|-----------|------|---------|
+| 1 | `cost_recommendation` list | `harness_list` | Discover recommendations with filters |
+| 2 | `cost_recommendation` get | `harness_get` | Full details to explain a specific recommendation |
+
+---
+
+### Step 1 — List recommendations (`harness_list` → `cost_recommendation`)
+
+Find recommendations, optionally scoped by perspective, cost category, cloud provider, or resource type:
+
+```json
+{
+  "resource_type": "cost_recommendation",
+  "recommendation_state": "OPEN",
+  "limit": 10
+}
+```
+
+**Common filter combinations:**
+
+By perspective (same as cost queries):
+
+```json
+{
+  "resource_type": "cost_recommendation",
+  "perspective_id": "<perspective_id>",
+  "recommendation_state": "OPEN",
+  "limit": 10
+}
+```
+
+By cost category bucket (ties into cost analysis):
+
+```json
+{
+  "resource_type": "cost_recommendation",
+  "cost_category_name": "Business Units",
+  "cost_category_bucket": "fraud solutions",
+  "recommendation_state": "OPEN",
+  "limit": 10
+}
+```
+
+By cloud provider and resource type:
+
+```json
+{
+  "resource_type": "cost_recommendation",
+  "cloud_provider": "GCP",
+  "resource_type_filter": "GOVERNANCE",
+  "recommendation_state": "OPEN",
+  "limit": 10
+}
+```
+
+By governance rule name:
+
+```json
+{
+  "resource_type": "cost_recommendation",
+  "governance_rule_name": "cosmosdb-low-usage",
+  "recommendation_state": "OPEN",
+  "limit": 10
+}
+```
+
+**Available filters:**
+- `perspective_id` — scope by perspective
+- `days_back` (default 4) — lookback window
+- `min_saving` (default 1) — minimum savings threshold ($)
+- `resource_type_filter` — `EC2_INSTANCE`, `AZURE_INSTANCE`, `ECS_SERVICE`, `GOVERNANCE`, `NODE_POOL`, `WORKLOAD`
+- `cloud_provider` — `AWS`, `GCP`, `AZURE` (comma-separated for multiple)
+- `recommendation_state` — `OPEN` (default)
+- `cloud_account_name`, `region`, `resource_name` — filter by specific resources
+- `cost_category_name` + `cost_category_bucket` — filter by business mapping bucket
+- `tag_key` + `tag_value` — filter by resource tags
+- `governance_rule_name` — filter by governance rule
+- `k8s_cluster_name`, `k8s_namespace`, `ecs_cluster_name` — container filters
+- `start_time_ms` / `end_time_ms` — applied-at time window
+- `limit` (default 10), `offset` (default 0)
+
+Returns per item: `id`, `resourceName`, `monthlySaving`, `monthlyCost`, `resourceType`, `recommendationState`, `cloudProvider`, `cloudAccountId`, `costCategoryDetails`, `jiraIssueKey`, `jiraStatus`.
+
+---
+
+### Step 2 — Explain a recommendation (`harness_get` → `cost_recommendation`)
+
+Fetch full details for a single recommendation. Requires both `resource_id` and `resource_type_filter` (from the list response):
+
+```json
+{
+  "resource_type": "cost_recommendation",
+  "resource_id": "<recommendation_id>",
+  "resource_type_filter": "GOVERNANCE"
+}
+```
+
+Returns type-specific details depending on `resource_type_filter`:
+
+| Type | What you get |
+|------|-------------|
+| `GOVERNANCE` | Rule name, cloud resource type (e.g. `gcp.instance`), action type, execution history with savings + resource count |
+| `WORKLOAD` | Container CPU/memory current vs recommended, last day cost, percentile-based sizing |
+| `NODE_POOL` | Current vs recommended node pools, VM types, pricing, spot vs on-demand |
+| `ECS_SERVICE` | ECS service current resources, last day cost, CPU/memory histograms |
+| `EC2_INSTANCE` | Same-family and cross-family right-sizing with utilization metrics |
+| `AZURE_INSTANCE` | Azure VM current vs target sizing with CPU/memory utilization |
+
+Also returns `totalMonthlyCost`, `totalMonthlySaving` stats and JIRA ticket reference (key + URL) if linked.
+
+---
+
+### Recommendation use-case patterns
+
+**1. Cost category analysis → recommendations:**
+When analyzing costs for a business unit or cost category, find related recommendations:
+- Run `cost_breakdown` with `business_mapping_name` + `filter_cost_category_value` for current spend
+- Run `cost_recommendation` list with `cost_category_name` + `cost_category_bucket` for savings opportunities
+- Present both: "You're spending $X/month on this BU, and there are $Y/month in open recommendations"
+
+**2. Top savings opportunities:**
+- List `cost_recommendation` with `recommendation_state: "OPEN"`, `limit: 20`
+- Sort by `monthlySaving` (highest first) to prioritize
+- Group by `cloudProvider` or `resourceType` to categorize
+
+**3. Explain a recommendation to the user:**
+- From the list, take the `id` and `resourceType`
+- Call `harness_get` with `resource_id` + `resource_type_filter`
+- Explain: what the recommendation is, current state vs recommended state, potential savings, execution history
+
+**4. Cross-reference with cost data:**
+- Use `cloudAccountId` from the recommendation to filter `cost_breakdown` / `cost_timeseries`
+- Show how the recommended resource's cost has trended — is it growing? stable?
+- This adds context: "This recommendation saves $X/month on a resource that has been growing 15% month-over-month"
+
+---
+
+## 9. Available group_by dimensions
 
 | Dimension | Field | Cloud |
 |-----------|-------|-------|
@@ -226,7 +369,7 @@ Returns: full anomaly record including `dailyBreakdown`, expected cost bounds, `
 
 ---
 
-## 8. Time filter presets
+## 10. Time filter presets
 
 `LAST_7`, `THIS_MONTH`, `LAST_30_DAYS`, `THIS_QUARTER`, `THIS_YEAR`, `LAST_MONTH`, `LAST_QUARTER`, `LAST_YEAR`, `LAST_3_MONTHS`, `LAST_6_MONTHS`, `LAST_12_MONTHS`
 
