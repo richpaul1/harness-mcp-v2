@@ -47,12 +47,15 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@napi-rs/canvas": "^0.1.97",
     "express": "^5.2.1",
+    "marked": "^15.0.0",
+    "pdfkit": "^0.16.0",
     "yaml": "^2.8.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^22.13.5",
+    "@types/pdfkit": "^0.13.9",
     "concurrently": "^9.1.2",
     "nodemon": "^3.1.9",
     "typescript": "^5.7.3",

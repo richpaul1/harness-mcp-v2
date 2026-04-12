@@ -16,6 +16,7 @@ import { registerStatusTool } from "./harness-status.js";
 import { registerCcmJsonTool } from "./harness-ccm-json.js";
 import { registerCcmChartTool } from "./harness-ccm-chart.js";
 import { registerCcmCostCategoryPeriodChartTool } from "./harness-ccm-cost-category-period-chart.js";
+import { registerMarkdownToPdfTool } from "./markdown-to-pdf.js";
 
 export function registerAllTools(server: McpServer, registry: Registry, client: HarnessClient, config: Config): void {
   registerListTool(server, registry, client);
@@ -31,4 +32,5 @@ export function registerAllTools(server: McpServer, registry: Registry, client: 
   registerCcmJsonTool(server, config);
   registerCcmChartTool(server, config);
   registerCcmCostCategoryPeriodChartTool(server, registry, client, config);
+  registerMarkdownToPdfTool(server);
 }
