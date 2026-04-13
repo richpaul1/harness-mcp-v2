@@ -85,13 +85,6 @@ export const connectorsToolset: ToolsetDefinition = {
           description: "Update a connector",
           bodySchema: connectorUpdateSchema,
         },
-        delete: {
-          method: "DELETE",
-          path: "/ng/api/connectors/{connectorIdentifier}",
-          pathParams: { connector_id: "connectorIdentifier" },
-          responseExtractor: ngExtract,
-          description: "Delete a connector",
-        },
       },
       executeActions: {
         test_connection: {

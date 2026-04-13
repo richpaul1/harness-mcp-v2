@@ -310,7 +310,8 @@ export class Registry {
       def.resourceType === "cost_breakdown" ||
       def.resourceType === "cost_summary" ||
       def.resourceType === "cost_anomaly" ||
-      def.resourceType === "cost_anomaly_summary";
+      def.resourceType === "cost_anomaly_summary" ||
+      def.resourceType === "cost_recommendation";
 
     if (
       isCcmGraphQlResource &&

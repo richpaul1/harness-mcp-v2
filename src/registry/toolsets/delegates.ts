@@ -82,13 +82,6 @@ export const delegatesToolset: ToolsetDefinition = {
           responseExtractor: ngExtract,
           description: "Create a delegate token",
         },
-        delete: {
-          method: "DELETE",
-          path: "/ng/api/delegate-token-ng/{tokenName}",
-          pathParams: { token_name: "tokenName" },
-          responseExtractor: ngExtract,
-          description: "Delete a delegate token",
-        },
       },
       executeActions: {
         revoke: {

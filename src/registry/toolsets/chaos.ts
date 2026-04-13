@@ -211,13 +211,6 @@ export const chaosToolset: ToolsetDefinition = {
             ],
           },
         },
-        delete: {
-          method: "DELETE",
-          path: "/chaos/manager/api/loadtest/instances/{loadtestId}",
-          pathParams: { loadtest_id: "loadtestId" },
-          responseExtractor: passthrough,
-          description: "Delete a load test instance",
-        },
       },
       executeActions: {
         run: {

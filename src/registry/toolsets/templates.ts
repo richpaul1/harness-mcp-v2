@@ -125,15 +125,6 @@ export const templatesToolset: ToolsetDefinition = {
           responseExtractor: ngExtract,
           description: "Create a template (step, stage, or pipeline). Body: template_yaml (string, required), identifier, name, label (version), is_stable.",
         },
-        delete: {
-          method: "DELETE",
-          path: "/template/api/templates/{templateIdentifier}",
-          pathParams: { template_id: "templateIdentifier" },
-          queryParams: { version_label: "versionLabel" },
-          responseExtractor: ngExtract,
-          description:
-            "Delete a template. If version_label is provided, only that version is deleted. If omitted, all versions of the template are deleted.",
-        },
       },
     },
   ],

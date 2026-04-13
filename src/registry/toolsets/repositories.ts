@@ -135,16 +135,6 @@ export const repositoriesToolset: ToolsetDefinition = {
             ],
           },
         },
-        delete: {
-          method: "DELETE",
-          path: "/code/api/v1/repos/{repoIdentifier}/branches/{branchName}",
-          pathParams: {
-            repo_id: "repoIdentifier",
-            branch_name: "branchName",
-          },
-          responseExtractor: passthrough,
-          description: "Delete a branch from the repository",
-        },
       },
     },
     {
@@ -308,16 +298,6 @@ export const repositoriesToolset: ToolsetDefinition = {
               { name: "message", type: "string", required: false, description: "Tag message (creates annotated tag)" },
             ],
           },
-        },
-        delete: {
-          method: "DELETE",
-          path: "/code/api/v1/repos/{repoIdentifier}/tags/{tagName}",
-          pathParams: {
-            repo_id: "repoIdentifier",
-            tag_name: "tagName",
-          },
-          responseExtractor: passthrough,
-          description: "Delete a tag from the repository",
         },
       },
     },

@@ -31,7 +31,7 @@ export type ToolsetName =
   | "settings"
   | "platform";
 
-export type OperationName = "list" | "get" | "create" | "update" | "delete";
+export type OperationName = "list" | "get" | "create" | "update";
 
 /**
  * Lightweight field descriptor for body schemas.

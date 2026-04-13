@@ -138,13 +138,6 @@ export const featureFlagsToolset: ToolsetDefinition = {
           description: "Create a new feature flag",
           bodySchema: featureFlagCreateSchema,
         },
-        delete: {
-          method: "DELETE",
-          path: "/cf/admin/features/{flagIdentifier}",
-          pathParams: { flag_id: "flagIdentifier" },
-          responseExtractor: passthrough,
-          description: "Delete a feature flag",
-        },
       },
       executeActions: {
         toggle: {

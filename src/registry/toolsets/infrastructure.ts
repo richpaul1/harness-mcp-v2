@@ -74,14 +74,6 @@ export const infrastructureToolset: ToolsetDefinition = {
           responseExtractor: ngExtract,
           description: "Update infrastructure definition",
         },
-        delete: {
-          method: "DELETE",
-          path: "/ng/api/infrastructures/{infraIdentifier}",
-          pathParams: { infrastructure_id: "infraIdentifier" },
-          queryParams: { environment_id: "environmentIdentifier" },
-          responseExtractor: ngExtract,
-          description: "Delete infrastructure definition",
-        },
       },
       executeActions: {
         move_configs: {

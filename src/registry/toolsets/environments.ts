@@ -83,13 +83,6 @@ export const environmentsToolset: ToolsetDefinition = {
           description: "Update an existing environment",
           bodySchema: environmentUpdateSchema,
         },
-        delete: {
-          method: "DELETE",
-          path: "/ng/api/environmentsV2/{environmentIdentifier}",
-          pathParams: { environment_id: "environmentIdentifier" },
-          responseExtractor: ngExtract,
-          description: "Delete an environment",
-        },
       },
       executeActions: {
         move_configs: {

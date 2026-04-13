@@ -201,15 +201,14 @@ function renderTokens(
       case "list": {
         const list = token as Tokens.List;
         list.items.forEach((item, idx) => {
-          const bullet = list.ordered ? `${(list.start ?? 1) + idx}. ` : "•  ";
+          const bullet = list.ordered ? `${Number(list.start ?? 1) + idx}. ` : "•  ";
           doc.font(FONTS.regular).fontSize(BODY_FONT_SIZE);
           doc.text(bullet, leftX, doc.y, { continued: true });
           if (item.tokens && item.tokens.length > 0) {
-            // Render the first token inline, rest below
             const first = item.tokens[0];
-            if (first.type === "text" && (first as Tokens.Text).tokens) {
+            if (first && first.type === "text" && (first as Tokens.Text).tokens) {
               renderInlineTokens(doc, (first as Tokens.Text).tokens, FONTS.regular, BODY_FONT_SIZE);
-            } else if ("text" in first) {
+            } else if (first && "text" in first) {
               doc.text((first as { text: string }).text, { continued: true });
             }
             doc.text(""); // end line

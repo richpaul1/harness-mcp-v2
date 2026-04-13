@@ -122,3 +122,124 @@ export const gqlExtract = (field: string) => (raw: unknown): unknown => {
   const r = raw as { data?: Record<string, unknown> };
   return r.data?.[field] ?? raw;
 };
+
+const JIRA_STRIP_KEYS = new Set([
+  "jiraFields", "jiraFieldNameToKeys", "serviceNowDetails",
+  "jiraConnector", "serviceNowConnector",
+]);
+
+/**
+ * CCM recommendation list — strip verbose JIRA/ServiceNow payloads.
+ * Handles both `{ data: [...] }` and `{ data: { items, total } }` response shapes.
+ */
+export const ccmRecommendationListCompactExtract = (raw: unknown): unknown => {
+  const data = ngExtract(raw);
+
+  let items: unknown[];
+  let total: number;
+
+  if (Array.isArray(data)) {
+    items = data;
+    total = data.length;
+  } else if (isRecord(data)) {
+    items = Array.isArray(data.items) ? data.items : [];
+    total = typeof data.total === "number" ? data.total : items.length;
+  } else {
+    return data;
+  }
+
+  const compact = items.map((item) => {
+    if (!isRecord(item)) return item;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(item)) {
+      if (JIRA_STRIP_KEYS.has(k)) continue;
+      out[k] = v;
+    }
+    if (isRecord(out.recommendationDetails)) {
+      const det: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(out.recommendationDetails as Record<string, unknown>)) {
+        if (JIRA_STRIP_KEYS.has(k)) continue;
+        det[k] = v;
+      }
+      out.recommendationDetails = det;
+    }
+    return out;
+  });
+
+  return { items: compact, total };
+};
+
+/**
+ * CCM budget list — strip alertThresholds (contains emails), budgetMonthlyBreakdown
+ * (mostly zeros), and internal UUIDs. Keep the essential budget health fields.
+ *
+ * Response shape: `{ status, data: { summaries: [...], totalCount: N } }`
+ */
+export const ccmBudgetListCompactExtract = (raw: unknown): { items: unknown[]; total: number } => {
+  const r = raw as { data?: { summaries?: unknown[]; totalCount?: number } };
+  let items: unknown[] = r.data?.summaries ?? [];
+  let total = typeof r.data?.totalCount === "number" ? r.data.totalCount : items.length;
+
+  if (items.length === 0) {
+    const paged = pageExtract(raw);
+    items = paged.items;
+    total = paged.total;
+  }
+
+  const compact = items.map((item) => {
+    if (!isRecord(item)) return item;
+    return {
+      id: item.uuid ?? item.id,
+      name: item.name,
+      perspectiveId: item.perspectiveId,
+      perspectiveName: item.perspectiveName,
+      budgetAmount: item.budgetAmount,
+      actualCost: item.actualCost,
+      forecastCost: item.forecastCost,
+      timeLeft: item.timeLeft,
+      timeUnit: item.timeUnit,
+      period: item.period,
+      type: item.type,
+      growthRate: item.growthRate,
+      actualCostAlerts: item.actualCostAlerts,
+      forecastCostAlerts: item.forecastCostAlerts,
+      budgetGroup: item.budgetGroup,
+      folderId: item.folderId,
+    };
+  });
+
+  return { items: compact, total };
+};
+
+/**
+ * CCM budget detail (GraphQL FetchBudgetsGridData) — strip __typename fields,
+ * return clean time-series with variance tracking.
+ */
+export const ccmBudgetDetailExtract = (raw: unknown): unknown => {
+  const r = raw as {
+    data?: {
+      budgetCostData?: { costData?: unknown[]; forecastCost?: number };
+      budgetSummary?: { period?: string };
+    };
+  };
+  if (!r.data) return raw;
+
+  const costData = r.data.budgetCostData?.costData;
+  const cleaned = Array.isArray(costData)
+    ? costData.map((d) => {
+        if (!isRecord(d)) return d;
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(d)) {
+          if (k === "__typename") continue;
+          out[k] = v;
+        }
+        return out;
+      })
+    : [];
+
+  return {
+    costData: cleaned,
+    forecastCost: r.data.budgetCostData?.forecastCost,
+    period: r.data.budgetSummary?.period,
+  };
+};

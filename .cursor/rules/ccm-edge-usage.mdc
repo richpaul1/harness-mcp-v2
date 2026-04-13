@@ -1,5 +1,5 @@
 ---
-description: CCM via ccm-edge MCP — perspectives, cost categories, breakdown, anomalies, recommendations, charts, spike triage
+description: CCM via ccm-edge MCP — bootstrap metadata, perspectives, cost categories, breakdown, anomalies, recommendations, charts, spike triage
 alwaysApply: true
 ---
 
@@ -8,16 +8,41 @@ alwaysApply: true
 MCP server: **`http://localhost:3000/mcp`**
 ---
 
-## 1. Resolve perspective, then query
+## 1. Bootstrap — discover what's available
+
+**Start every session** by calling `harness_list` (or `harness_get`) with `resource_type: "cost_metadata"` (no filters needed):
+
+```json
+{
+  "resource_type": "cost_metadata"
+}
+```
+
+Returns:
+- **Which clouds are connected:** `awsConnectorsPresent`, `gcpConnectorsPresent`, `azureConnectorsPresent`, `k8sClusterConnectorPresent`
+- **Default perspective IDs:** `defaultAwsPerspectiveId`, `defaultGcpPerspectiveId`, `defaultAzurePerspectiveId`, `defaultClusterPerspectiveId`
+- **Data availability:** `cloudDataPresent`, `clusterDataPresent`, `inventoryDataPresent`
+- **Currency:** `currencyPreference.destinationCurrency`, `currencyPreference.symbol`
+
+Use this to:
+1. Know which cloud providers to query (don't query GCP if `gcpConnectorsPresent: false`)
+2. Get default perspective IDs without a separate `cost_summary` call
+3. Display costs in the correct currency
+
+---
+
+## 2. Resolve perspective, then query
 
 1. **List all perspectives** (including custom ones): **`harness_list`** `resource_type: "cost_perspective"`. Search by name with `search_term`. Returns `id`, `name`, `viewType`, `dataSources`, etc.
-2. **Quick default perspective IDs:** **`harness_list`** `resource_type: "cost_summary"` with **no** `perspective_id` → read **`defaultAwsPerspectiveId`**, **`defaultGcpPerspectiveId`**, etc.
+2. **Quick default perspective IDs:** Use `cost_metadata` (section 1) or **`harness_list`** `resource_type: "cost_summary"` with **no** `perspective_id`.
 3. Build queries with: `perspective_id`, `time_filter` (or `start_time_ms`/`end_time_ms`), **`group_by`** for rollups.
 4. **Resource types**
    - **`cost_breakdown`** — per-entity cost + costTrend (% change vs previous period). **One call = both periods.**
    - **`cost_timeseries`** — daily/weekly/monthly cost over time, grouped by dimension.
    - **`cost_summary`** — total cost, trend, idle, unallocated, efficiency score, forecast.
    - **`cost_category`** — business mappings (list returns **name + uuid only**; use `harness_get` for full rules).
+   - **`cost_recommendation`** — optimization recommendations (see section 8).
+   - **`cost_budget`** — budget tracking and variance analysis (see section 9).
 5. Never omit **`perspective_id`** where required.
 6. **Period comparison — single query:** Query the **current** window; each row returns **`cost`** (current total) **and `costTrend`** (% change vs prior equal-length window). Derive previous:
    \$\text{previous cost} = \text{cost} / (1 + \text{costTrend} / 100)\$
@@ -25,7 +50,7 @@ MCP server: **`http://localhost:3000/mcp`**
 
 ---
 
-## 2. Cost category filtering — `filter_cost_category_value`
+## 3. Cost category filtering — `filter_cost_category_value`
 
 To drill into a **specific cost category bucket** (e.g. a Business Unit) broken down by another dimension — **one call**, not 10+:
 
@@ -46,7 +71,7 @@ To drill into a **specific cost category bucket** (e.g. a Business Unit) broken 
 
 ---
 
-## 3. Usage-only (persist for the thread)
+## 4. Usage-only (persist for the thread)
 
 If the user asks for **Usage only** (run-rate / usage-based cost):
 
@@ -57,7 +82,7 @@ If the user asks for **Usage only** (run-rate / usage-based cost):
 
 ---
 
-## 4. Charts — ALWAYS generate
+## 5. Charts — ALWAYS generate
 
 **Every cost query that returns data MUST include an inline chart.** Charts are not optional — they are the primary deliverable. Text summaries are supplementary.
 
@@ -71,15 +96,15 @@ If the user asks for **Usage only** (run-rate / usage-based cost):
 
 ---
 
-## 5. Cost spike investigation — repeatable pattern
+## 6. Cost spike investigation — repeatable pattern
 
 Use this **same sequence** whenever the user asks what drove a **spike**, **day-over-day jump**, or **period vs period** increase. Adapt dimensions to the cloud (below defaults to **GCP**; substitute AWS fields from `harness_describe`).
 
 ### A. Lock the question
 
-1. **Metric:** Full CCM cost vs **Usage-only** — if Usage-only, keep **§3** for the whole investigation.
+1. **Metric:** Full CCM cost vs **Usage-only** — if Usage-only, keep **§4** for the whole investigation.
 2. **Comparison:** two windows of equal length, **UTC**, via **`start_time_ms` / `end_time_ms`**.
-3. **Perspective:** Resolve **`perspective_id`** per **§1**; never omit it.
+3. **Perspective:** Resolve **`perspective_id`** per **§1–2**; never omit it.
 
 ### B. See the shape (when it started)
 
@@ -122,7 +147,7 @@ Use this **same sequence** whenever the user asks what drove a **spike**, **day-
 
 ---
 
-## 6. Cost anomaly investigation — three-step pattern
+## 7. Cost anomaly investigation — three-step pattern
 
 Use this when the user asks about **anomalies**, **unexpected spikes**, or **alerts**.
 
@@ -204,14 +229,14 @@ Returns: full anomaly record including `dailyBreakdown`, expected cost bounds, `
 
 ---
 
-## 7. Cost recommendations — two-step pattern
+## 8. Cost recommendations — two-step pattern
 
 Use this when the user asks about **recommendations**, **savings opportunities**, **right-sizing**, **optimization**, or **what can we save**.
 
 | Step | Operation | Tool | Purpose |
 |------|-----------|------|---------|
-| 1 | `cost_recommendation` list | `harness_list` | Discover recommendations with filters |
-| 2 | `cost_recommendation` get | `harness_get` | Full details to explain a specific recommendation |
+| 1 | `cost_recommendation` list | `harness_list` | Discover recommendations with rich filters |
+| 2 | `cost_recommendation` get | `harness_get` | Summary for a single recommendation by ID |
 
 ---
 
@@ -222,8 +247,10 @@ Find recommendations, optionally scoped by perspective, cost category, cloud pro
 ```json
 {
   "resource_type": "cost_recommendation",
-  "recommendation_state": "OPEN",
-  "limit": 10
+  "filters": {
+    "recommendation_state": "OPEN",
+    "limit": 10
+  }
 }
 ```
 
@@ -234,9 +261,11 @@ By perspective (same as cost queries):
 ```json
 {
   "resource_type": "cost_recommendation",
-  "perspective_id": "<perspective_id>",
-  "recommendation_state": "OPEN",
-  "limit": 10
+  "filters": {
+    "perspective_id": "<perspective_id>",
+    "recommendation_state": "OPEN",
+    "limit": 10
+  }
 }
 ```
 
@@ -245,10 +274,12 @@ By cost category bucket (ties into cost analysis):
 ```json
 {
   "resource_type": "cost_recommendation",
-  "cost_category_name": "Business Units",
-  "cost_category_bucket": "fraud solutions",
-  "recommendation_state": "OPEN",
-  "limit": 10
+  "filters": {
+    "cost_category_name": "Business Units",
+    "cost_category_bucket": "fraud solutions",
+    "recommendation_state": "OPEN",
+    "limit": 10
+  }
 }
 ```
 
@@ -257,10 +288,12 @@ By cloud provider and resource type:
 ```json
 {
   "resource_type": "cost_recommendation",
-  "cloud_provider": "GCP",
-  "resource_type_filter": "GOVERNANCE",
-  "recommendation_state": "OPEN",
-  "limit": 10
+  "filters": {
+    "cloud_provider": "GCP",
+    "resource_type_filter": "GOVERNANCE",
+    "recommendation_state": "OPEN",
+    "limit": 10
+  }
 }
 ```
 
@@ -269,9 +302,11 @@ By governance rule name:
 ```json
 {
   "resource_type": "cost_recommendation",
-  "governance_rule_name": "cosmosdb-low-usage",
-  "recommendation_state": "OPEN",
-  "limit": 10
+  "filters": {
+    "governance_rule_name": "cosmosdb-low-usage",
+    "recommendation_state": "OPEN",
+    "limit": 10
+  }
 }
 ```
 
@@ -290,34 +325,31 @@ By governance rule name:
 - `start_time_ms` / `end_time_ms` — applied-at time window
 - `limit` (default 10), `offset` (default 0)
 
-Returns per item: `id`, `resourceName`, `monthlySaving`, `monthlyCost`, `resourceType`, `recommendationState`, `cloudProvider`, `cloudAccountId`, `costCategoryDetails`, `jiraIssueKey`, `jiraStatus`.
+Returns per item: `id`, `resourceName`, `monthlySaving`, `monthlyCost`, `resourceType`, `recommendationState`, `cloudProvider`, `cloudAccountId`, `costCategoryDetails`. JIRA/ServiceNow noise is stripped automatically.
 
 ---
 
-### Step 2 — Explain a recommendation (`harness_get` → `cost_recommendation`)
+### Step 2 — Get recommendation summary (`harness_get` → `cost_recommendation`)
 
-Fetch full details for a single recommendation. Requires both `resource_id` and `resource_type_filter` (from the list response):
+Fetch summary and savings stats for a single recommendation by its `id`:
 
 ```json
 {
   "resource_type": "cost_recommendation",
-  "resource_id": "<recommendation_id>",
-  "resource_type_filter": "GOVERNANCE"
+  "resource_id": "<recommendation_id>"
 }
 ```
 
-Returns type-specific details depending on `resource_type_filter`:
+Returns: `items[]` (with `id`, `resourceName`, `resourceType`, `monthlyCost`, `monthlySaving`) and `stats` (`totalMonthlyCost`, `totalMonthlySaving`, `count`).
 
-| Type | What you get |
-|------|-------------|
-| `GOVERNANCE` | Rule name, cloud resource type (e.g. `gcp.instance`), action type, execution history with savings + resource count |
-| `WORKLOAD` | Container CPU/memory current vs recommended, last day cost, percentile-based sizing |
-| `NODE_POOL` | Current vs recommended node pools, VM types, pricing, spot vs on-demand |
-| `ECS_SERVICE` | ECS service current resources, last day cost, CPU/memory histograms |
-| `EC2_INSTANCE` | Same-family and cross-family right-sizing with utilization metrics |
-| `AZURE_INSTANCE` | Azure VM current vs target sizing with CPU/memory utilization |
+For perspective-scoped recommendations, pass `perspective_id` via params:
 
-Also returns `totalMonthlyCost`, `totalMonthlySaving` stats and JIRA ticket reference (key + URL) if linked.
+```json
+{
+  "resource_type": "cost_recommendation",
+  "params": { "perspective_id": "<perspective_id>" }
+}
+```
 
 ---
 
@@ -335,9 +367,9 @@ When analyzing costs for a business unit or cost category, find related recommen
 - Group by `cloudProvider` or `resourceType` to categorize
 
 **3. Explain a recommendation to the user:**
-- From the list, take the `id` and `resourceType`
-- Call `harness_get` with `resource_id` + `resource_type_filter`
-- Explain: what the recommendation is, current state vs recommended state, potential savings, execution history
+- From the list, take the `id`
+- Call `harness_get` with `resource_id` to get savings stats
+- Explain: resource name, monthly cost, potential savings, resource type
 
 **4. Cross-reference with cost data:**
 - Use `cloudAccountId` from the recommendation to filter `cost_breakdown` / `cost_timeseries`
@@ -346,7 +378,149 @@ When analyzing costs for a business unit or cost category, find related recommen
 
 ---
 
-## 9. Available group_by dimensions
+## 9. Cost budgets — two-step pattern
+
+Use this when the user asks about **budgets**, **overspend**, **budget health**, or **forecast vs budget**.
+
+| Step | Operation | Tool | Purpose |
+|------|-----------|------|---------|
+| 1 | `cost_budget` list | `harness_list` | Discover budgets, check health |
+| 2 | `cost_budget` get | `harness_get` | Time-series detail for a specific budget |
+
+---
+
+### Step 1 — List budgets (`harness_list` → `cost_budget`)
+
+List all budgets, optionally filtered by name or perspective:
+
+```json
+{
+  "resource_type": "cost_budget"
+}
+```
+
+Search by name:
+
+```json
+{
+  "resource_type": "cost_budget",
+  "search_term": "production"
+}
+```
+
+Filter by perspective:
+
+```json
+{
+  "resource_type": "cost_budget",
+  "filters": {
+    "perspective_name": "GCP Default"
+  }
+}
+```
+
+Returns per item: `id`, `name`, `perspectiveId`, `perspectiveName`, `budgetAmount`, `actualCost`, `forecastCost`, `timeLeft`, `timeUnit`, `period`, `type`, `growthRate`, `actualCostAlerts`, `forecastCostAlerts`.
+
+**Quick health check from list data:**
+- **On budget:** `actualCost < budgetAmount` with `timeLeft` remaining
+- **Overspend risk:** `forecastCost > budgetAmount` — projected to exceed
+- **Already over:** `actualCost > budgetAmount` — already exceeded
+- **Alerts fired:** `actualCostAlerts` / `forecastCostAlerts` show which thresholds crossed
+
+---
+
+### Step 2 — Budget detail (`harness_get` → `cost_budget`)
+
+Get month-by-month (or yearly) actual vs budgeted with variance tracking:
+
+```json
+{
+  "resource_type": "cost_budget",
+  "resource_id": "<budget_id>"
+}
+```
+
+With yearly breakdown:
+
+```json
+{
+  "resource_type": "cost_budget",
+  "resource_id": "<budget_id>",
+  "params": { "breakdown": "YEARLY" }
+}
+```
+
+Returns `costData[]` — one entry per period:
+- `time` / `endTime` — period boundaries (epoch ms)
+- `actualCost` — what was actually spent
+- `budgeted` — what was budgeted
+- `budgetVariance` — `actualCost - budgeted` (negative = under budget)
+- `budgetVariancePercentage` — same as percentage
+- `forecastCost` — projected cost (non-zero for current period)
+
+Also returns top-level `forecastCost` (overall projection) and `period` (MONTHLY/YEARLY).
+
+The **last entry** in `costData` is typically the current (incomplete) period.
+
+---
+
+### Budget use-case patterns
+
+**1. Budget health check:**
+- List `cost_budget` → check `actualCost` vs `budgetAmount` and `forecastCost`
+- Flag budgets where `forecastCost > budgetAmount` (projected overspend)
+- Report `timeLeft` for context
+
+**2. Budget vs actuals trend:**
+- Get `cost_budget` with `budget_id` → `costData[]` shows month-by-month variance
+- Chart with `harness_ccm_chart`: budgeted as reference line, actualCost as bars
+- Highlight months where `budgetVariance > 0` (over budget)
+
+**3. Cross-reference with cost analysis:**
+- From budget list, get `perspectiveId`
+- Use that perspective for `cost_breakdown` / `cost_timeseries` to understand what's driving spend
+- Combine: "Budget X is at 85% with 10 days left, and the top cost driver is Compute Engine growing 12% MoM"
+
+**4. Budget search by perspective:**
+- Filter `cost_budget` list with `perspective_name` to find budgets for a specific team/project
+- Useful when the user names a perspective rather than a budget
+
+---
+
+## 10. Budget health sweep — one-call risk assessment
+
+For **monthly FinOps health checks**, **budget reviews**, or **"are we on budget?"** questions, use `harness_ccm_budget_health` instead of manually processing `cost_budget` list output.
+
+```json
+{
+  "tool": "harness_ccm_budget_health"
+}
+```
+
+With filters:
+
+```json
+{
+  "tool": "harness_ccm_budget_health",
+  "perspective_name": "Domain - GPS",
+  "period": "MONTHLY",
+  "min_budget": 1000
+}
+```
+
+**Returns pre-classified groups** — no scripting needed:
+- **`over_budget`** — `actualCost > budgetAmount`: already exceeded, sorted by overage descending
+- **`at_risk`** — `forecastCost > budgetAmount` but not yet over: projected to exceed, sorted by projected overrun
+- **`on_track`** — `forecastCost <= budgetAmount`: within budget, sorted by utilization %
+- **`summary`** — counts for each group + `skipped` (draft/zero-amount budgets)
+
+Each item includes: `name`, `perspective`, `period`, `budget_amount`, `actual_cost`, `forecast_cost`, `pct_actual`, `pct_forecast`, `time_left_days`, and either `overage` or `projected_overrun`.
+
+**Chart the results:** pass `over_budget` + `at_risk` arrays directly to `harness_ccm_chart` as bar chart data — e.g. budget vs actual vs forecast grouped bars.
+
+---
+
+## 12. Available group_by dimensions
 
 | Dimension | Field | Cloud |
 |-----------|-------|-------|
@@ -369,7 +543,7 @@ When analyzing costs for a business unit or cost category, find related recommen
 
 ---
 
-## 10. Time filter presets
+## 13. Time filter presets
 
 `LAST_7`, `THIS_MONTH`, `LAST_30_DAYS`, `THIS_QUARTER`, `THIS_YEAR`, `LAST_MONTH`, `LAST_QUARTER`, `LAST_YEAR`, `LAST_3_MONTHS`, `LAST_6_MONTHS`, `LAST_12_MONTHS`
 

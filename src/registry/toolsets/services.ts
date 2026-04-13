@@ -79,13 +79,6 @@ export const servicesToolset: ToolsetDefinition = {
           description: "Update an existing service",
           bodySchema: serviceUpdateSchema,
         },
-        delete: {
-          method: "DELETE",
-          path: "/ng/api/servicesV2/{serviceIdentifier}",
-          pathParams: { service_id: "serviceIdentifier" },
-          responseExtractor: ngExtract,
-          description: "Delete a service",
-        },
       },
     },
   ],

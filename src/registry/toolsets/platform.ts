@@ -197,13 +197,6 @@ export const platformToolset: ToolsetDefinition = {
           bodySchema: orgUpdateSchema,
           bodyWrapperKey: "org",
         },
-        delete: {
-          method: "DELETE",
-          path: "/v1/orgs/{org}",
-          pathParams: { org_id: "org" },
-          responseExtractor: v1Unwrap("org"),
-          description: "Delete an organization",
-        },
       },
     },
 
@@ -266,13 +259,6 @@ export const platformToolset: ToolsetDefinition = {
           description: "Update an existing project",
           bodySchema: projectUpdateSchema,
           bodyWrapperKey: "project",
-        },
-        delete: {
-          method: "DELETE",
-          path: "/v1/orgs/{org}/projects/{project}",
-          pathParams: { org_id: "org", project_id: "project" },
-          responseExtractor: v1Unwrap("project"),
-          description: "Delete a project",
         },
       },
     },

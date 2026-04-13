@@ -136,13 +136,6 @@ export const pipelinesToolset: ToolsetDefinition = {
           description: "Update an existing pipeline YAML. For remote pipelines, pass store_type='REMOTE' with git details and last_object_id/last_commit_id from the GET response. For Harness Code: add is_harness_code_repo=true (no connector_ref needed).",
           bodySchema: pipelineUpdateSchema,
         },
-        delete: {
-          method: "DELETE",
-          path: "/pipeline/api/pipelines/{pipelineIdentifier}",
-          pathParams: { pipeline_id: "pipelineIdentifier" },
-          responseExtractor: ngExtract,
-          description: "Delete a pipeline",
-        },
       },
       executeActions: {
         run: {
@@ -359,13 +352,6 @@ export const pipelinesToolset: ToolsetDefinition = {
               { name: "trigger", type: "object", required: false, description: "Wrapper key (optional — body is auto-wrapped if not present). Inner fields: name, identifier, enabled, pipelineIdentifier, type, source, inputYaml" },
             ],
           },
-        },
-        delete: {
-          method: "DELETE",
-          path: "/pipeline/api/triggers/{triggerIdentifier}",
-          pathParams: { trigger_id: "triggerIdentifier" },
-          responseExtractor: ngExtract,
-          description: "Delete a pipeline trigger",
         },
       },
     },

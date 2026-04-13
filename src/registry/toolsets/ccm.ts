@@ -1,5 +1,5 @@
 import type { ToolsetDefinition } from "../types.js";
-import { ngExtract, pageExtract, passthrough, gqlExtract, ccmBusinessMappingListExtract, ccmBusinessMappingListCompactExtract } from "../extractors.js";
+import { ngExtract, pageExtract, passthrough, gqlExtract, ccmBusinessMappingListExtract, ccmBusinessMappingListCompactExtract, ccmRecommendationListCompactExtract, ccmBudgetListCompactExtract, ccmBudgetDetailExtract } from "../extractors.js";
 
 // ---------------------------------------------------------------------------
 // GraphQL queries — ported from the official Go MCP server
@@ -166,6 +166,23 @@ query PerspectiveRecommendations($filter: RecommendationFilterDTOInput) {
       clusterName namespace id resourceType resourceName
       monthlyCost monthlySaving __typename
     }
+    __typename
+  }
+}`;
+
+const BUDGET_GRID_DATA_QUERY = `
+query FetchBudgetsGridData($id: String!, $breakdown: BudgetBreakdown) {
+  budgetCostData(budgetId: $id, breakdown: $breakdown) {
+    costData {
+      time actualCost forecastCost budgeted
+      budgetVariance budgetVariancePercentage endTime
+      __typename
+    }
+    forecastCost
+    __typename
+  }
+  budgetSummary(budgetId: $id) {
+    period
     __typename
   }
 }`;
@@ -692,10 +709,10 @@ export const ccmToolset: ToolsetDefinition = {
         },
         get: {
           method: "GET",
-          path: "/ccm/api/perspective/{perspectiveId}",
-          pathParams: { perspective_id: "perspectiveId" },
+          path: "/ccm/api/perspective",
+          queryParams: { perspective_id: "perspectiveId" },
           responseExtractor: ngExtract,
-          description: "Get cost perspective details by ID",
+          description: "Get cost perspective details by ID — returns viewRules, viewPreferences (cost accounting settings), dataSources, viewVisualization (default groupBy/chart), totalCost, and creator info.",
         },
         create: {
           method: "POST",
@@ -729,13 +746,6 @@ export const ccmToolset: ToolsetDefinition = {
           },
           responseExtractor: ngExtract,
           description: "Update an existing cost perspective",
-        },
-        delete: {
-          method: "DELETE",
-          path: "/ccm/api/perspective/{perspectiveId}",
-          pathParams: { perspective_id: "perspectiveId" },
-          responseExtractor: ngExtract,
-          description: "Delete a cost perspective",
         },
       },
     },
@@ -1027,11 +1037,8 @@ Use with no perspective_id to get CCM metadata (available connectors, default pe
     },
 
     // ------------------------------------------------------------------
-    // 5. cost_recommendation — REST for general recs, GraphQL for
-    //    perspective-scoped recs. Two operations: list (REST) and get
-    //    (GraphQL by perspective).
-    //    Replaces: 5 resource-type-specific tools + list tools from the
-    //              official server, all parameterized by resource_type
+    // 5. cost_recommendation — REST list with rich filtering, GraphQL get
+    //    for single recommendation or perspective-scoped stats.
     //    Answers: "How do I reduce my cloud bill?"
     // ------------------------------------------------------------------
     {
@@ -1039,53 +1046,162 @@ Use with no perspective_id to get CCM metadata (available connectors, default pe
       displayName: "Cost Recommendation",
       description: `Cloud cost optimization recommendations. Answers "how do I reduce my cloud bill?"
 
-harness_list: General recommendations across the account.
-harness_get: Perspective-scoped recommendations — pass perspective_id to get recs for a specific perspective with savings stats. Optionally pass min_saving, time_filter (${VALID_TIME_FILTERS.join(", ")}), limit, offset.
+harness_list: Discover recommendations with rich filtering — by perspective, cost category, cloud provider, resource type, governance rule, tags, and more. Returns all resource types (EC2, Azure VM, ECS, Node Pool, Workload, Governance) in a single list. Strips verbose JIRA/ServiceNow payloads for clean output.
 
-Replaces the 5 separate resource-type tools from the official server (EC2, Azure VM, ECS, Node Pool, Workload) — all resource types are returned in a single list.`,
+harness_get: With resource_id (recommendation ID) → summary for that recommendation. With perspective_id via params → perspective-scoped recommendations with savings stats.`,
       toolset: "ccm",
       scope: "account",
-      identifierFields: ["perspective_id"],
+      identifierFields: ["recommendation_id"],
       listFilterFields: [
-        { name: "min_saving", description: "Minimum savings threshold", type: "number" },
-        { name: "time_filter", description: "Time range filter", enum: [...VALID_TIME_FILTERS] },
-        { name: "filter_gcp_project_id", description: "For harness_get only: scope perspective filters to GCP project id(s)" },
-        { name: "filter_gcp_project_ids", description: "Array of GCP project ids" },
-        { name: "filter_gcp_product", description: "For harness_get: scope to GCP product name(s)" },
-        { name: "filter_gcp_products", description: "Array of GCP product names" },
-        { name: "filter_product", description: "For harness_get: scope to COMMON product name(s)" },
-        { name: "filter_products", description: "Array of COMMON product names" },
-        { name: "limit", description: "Result limit", type: "number" },
-        { name: "offset", description: "Pagination offset", type: "number" },
+        { name: "perspective_id", description: "Scope recommendations to a perspective" },
+        { name: "days_back", description: "Lookback window in days (default 4)", type: "number" },
+        { name: "min_saving", description: "Minimum savings threshold in dollars (default 1)", type: "number" },
+        { name: "resource_type_filter", description: "Filter by resource type (comma-separated: EC2_INSTANCE, AZURE_INSTANCE, ECS_SERVICE, GOVERNANCE, NODE_POOL, WORKLOAD)" },
+        { name: "cloud_provider", description: "Filter by cloud provider (comma-separated: AWS, GCP, AZURE)" },
+        { name: "recommendation_state", description: "Filter by state (default OPEN)", enum: ["OPEN", "APPLIED", "IGNORED"] },
+        { name: "cloud_account_name", description: "Filter by cloud account name(s)" },
+        { name: "region", description: "Filter by region(s)" },
+        { name: "resource_name", description: "Filter by resource name(s)" },
+        { name: "cost_category_name", description: "Cost category name for bucket filtering (used with cost_category_bucket)" },
+        { name: "cost_category_bucket", description: "Cost category bucket value (used with cost_category_name)" },
+        { name: "tag_key", description: "Resource tag key (used with tag_value)" },
+        { name: "tag_value", description: "Resource tag value (used with tag_key)" },
+        { name: "governance_rule_name", description: "Filter by governance rule name(s)" },
+        { name: "k8s_cluster_name", description: "Filter by Kubernetes cluster name(s)" },
+        { name: "k8s_namespace", description: "Filter by Kubernetes namespace(s)" },
+        { name: "ecs_cluster_name", description: "Filter by ECS cluster name(s)" },
+        { name: "start_time_ms", description: "Applied-at window start (epoch ms)" },
+        { name: "end_time_ms", description: "Applied-at window end (epoch ms)" },
+        { name: "time_filter", description: "Time range preset for perspective scoping", enum: [...VALID_TIME_FILTERS] },
+        { name: "limit", description: "Result limit (default 10)", type: "number" },
+        { name: "offset", description: "Pagination offset (default 0)", type: "number" },
       ],
       operations: {
         list: {
           method: "POST",
           path: "/ccm/api/recommendation/overview/list",
-          bodyBuilder: () => ({}),
-          responseExtractor: ngExtract,
+          bodyBuilder: (input) => {
+            const body: Record<string, unknown> = {
+              filterType: "CCMRecommendation",
+              daysBack: (input.days_back as number) ?? 4,
+              minSaving: (input.min_saving as number) ?? 1,
+              offset: (input.offset as number) ?? 0,
+              limit: (input.limit as number) ?? 10,
+            };
+
+            if (input.perspective_id) {
+              body.perspectiveFilters = buildFilters(
+                input.perspective_id as string,
+                (input.time_filter as string) ?? "LAST_30_DAYS",
+                input,
+              );
+            }
+
+            if (input.cost_category_name && input.cost_category_bucket) {
+              body.costCategoryDTOs = [{
+                costCategory: input.cost_category_name as string,
+                costBucket: input.cost_category_bucket as string,
+              }];
+            }
+
+            if (input.tag_key && input.tag_value) {
+              body.tagDTOs = [{
+                key: input.tag_key as string,
+                value: input.tag_value as string,
+              }];
+            }
+
+            const baseFilter: Record<string, unknown> = {};
+            if (input.resource_type_filter) {
+              baseFilter.resourceType = normalizePerspectiveIdFilterValues(input.resource_type_filter);
+            }
+            if (input.cloud_provider) {
+              baseFilter.cloudProvider = normalizePerspectiveIdFilterValues(input.cloud_provider);
+            }
+            if (input.cloud_account_name) {
+              baseFilter.cloudAccountName = normalizePerspectiveIdFilterValues(input.cloud_account_name);
+            }
+            if (input.region) {
+              baseFilter.region = normalizePerspectiveIdFilterValues(input.region);
+            }
+            if (input.resource_name) {
+              baseFilter.resourceName = normalizePerspectiveIdFilterValues(input.resource_name);
+            }
+            if (typeof input.start_time_ms === "number") {
+              baseFilter.appliedAtStartTime = input.start_time_ms;
+            }
+            if (typeof input.end_time_ms === "number") {
+              baseFilter.appliedAtEndTime = input.end_time_ms;
+            }
+            if (Object.keys(baseFilter).length > 0) {
+              body.baseRecommendationFilterPropertiesDTO = baseFilter;
+            }
+
+            const containerFilter: Record<string, unknown> = {};
+            if (input.k8s_cluster_name) {
+              containerFilter.k8sClusterName = normalizePerspectiveIdFilterValues(input.k8s_cluster_name);
+            }
+            if (input.k8s_namespace) {
+              containerFilter.k8sNamespace = normalizePerspectiveIdFilterValues(input.k8s_namespace);
+            }
+            if (input.ecs_cluster_name) {
+              containerFilter.ecsClusterName = normalizePerspectiveIdFilterValues(input.ecs_cluster_name);
+            }
+            if (Object.keys(containerFilter).length > 0) {
+              body.containerRecommendationFilterPropertiesDTO = containerFilter;
+            }
+
+            if (input.governance_rule_name) {
+              body.governanceRecommendationFilterPropertiesDTO = {
+                governanceRuleName: normalizePerspectiveIdFilterValues(input.governance_rule_name),
+              };
+            }
+
+            if (input.recommendation_state) {
+              body.k8sRecommendationFilterPropertiesDTO = {
+                recommendationStates: normalizePerspectiveIdFilterValues(input.recommendation_state),
+              };
+            }
+
+            return body;
+          },
+          responseExtractor: ccmRecommendationListCompactExtract,
           description:
-            "List all cost optimization recommendations across the account. Returns recommendations for all resource types (EC2, Azure VM, ECS, Node Pool, Workload) in a single response.",
+            "List cost recommendations with rich filtering — by perspective, cost category, cloud provider, resource type, governance rule, tags. " +
+            "Strips verbose JIRA/ServiceNow payloads. Returns items with id, resourceName, monthlySaving, monthlyCost, resourceType, cloudProvider.",
         },
         get: {
           method: "POST",
           path: "/ccm/api/graphql",
-          bodyBuilder: (input) => ({
-            query: PERSPECTIVE_RECOMMENDATIONS_QUERY,
-            operationName: "PerspectiveRecommendations",
-            variables: {
-              filter: {
-                perspectiveFilters: buildFilters(
-                  input.perspective_id as string,
-                  (input.time_filter as string) ?? "LAST_30_DAYS",
-                  input,
-                ),
-                limit: (input.limit as number) ?? 25,
-                offset: (input.offset as number) ?? 0,
-                minSaving: (input.min_saving as number) ?? 0,
-              },
-            },
-          }),
+          bodyBuilder: (input) => {
+            const filter: Record<string, unknown> = {
+              limit: (input.limit as number) ?? 25,
+              offset: (input.offset as number) ?? 0,
+              minSaving: (input.min_saving as number) ?? 0,
+            };
+
+            if (input.recommendation_id) {
+              filter.ids = [input.recommendation_id as string];
+            }
+
+            if (input.perspective_id) {
+              filter.perspectiveFilters = buildFilters(
+                input.perspective_id as string,
+                (input.time_filter as string) ?? "LAST_30_DAYS",
+                input,
+              );
+            }
+
+            if (input.recommendation_state) {
+              filter.recommendationStates = normalizePerspectiveIdFilterValues(input.recommendation_state);
+            }
+
+            return {
+              query: PERSPECTIVE_RECOMMENDATIONS_QUERY,
+              operationName: "PerspectiveRecommendations",
+              variables: { filter },
+            };
+          },
           responseExtractor: (raw) => {
             const r = raw as {
               data?: {
@@ -1099,7 +1215,8 @@ Replaces the 5 separate resource-type tools from the official server (EC2, Azure
             };
           },
           description:
-            "Get recommendations scoped to a specific perspective, with aggregate savings stats. Filter by min_saving, time_filter.",
+            "Get recommendation details. With resource_id: summary for a single recommendation. " +
+            "With perspective_id (via params): perspective-scoped recommendations with aggregate savings stats.",
         },
       },
       executeActions: {
@@ -1403,7 +1520,82 @@ Supports the same group_by dimensions as cost_breakdown (${VALID_GROUP_BY_FIELDS
     },
 
     // ------------------------------------------------------------------
-    // 8. cost_overview — REST overview endpoint
+    // 8. cost_budget — REST list + GraphQL detail with time-series variance
+    //    Answers: "Are we on budget?" / "Will we overspend?"
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_budget",
+      displayName: "Cost Budget",
+      description: `Cloud cost budgets — track spend vs budget, forecast overspend, and monitor alerts. Answers "are we on budget?" and "will we overspend?"
+
+harness_list: List budgets with optional search by name and perspective filtering. Returns budget health: actualCost vs budgetAmount, forecastCost, timeLeft, alerts.
+harness_get: Time-series detail for a specific budget — month-by-month (or yearly) actual vs budgeted with variance tracking. Pass budget_id (from list) and optional breakdown (MONTHLY or YEARLY).`,
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: ["budget_id"],
+      listFilterFields: [
+        { name: "search_term", description: "Search budgets by name" },
+        { name: "perspective_name", description: "Filter by perspective name(s) (comma-separated)" },
+        { name: "sort_type", description: "Sort field", enum: ["NAME", "LAST_EDIT", "CREATION_TIME"] },
+        { name: "sort_order", description: "Sort direction", enum: ["ASCENDING", "DESCENDING"] },
+        { name: "breakdown", description: "Time breakdown for get operation", enum: ["MONTHLY", "YEARLY"] },
+        { name: "limit", description: "Result limit (default 20)", type: "number" },
+        { name: "offset", description: "Pagination offset (default 0)", type: "number" },
+      ],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/budget",
+      operations: {
+        list: {
+          method: "POST",
+          path: "/ccm/api/budgets/v2/list",
+          queryParams: {
+            sort_type: "sortType",
+            sort_order: "sortOrder",
+          },
+          bodyBuilder: (input) => {
+            const body: Record<string, unknown> = {
+              filterType: "CCMBudget",
+              limit: (input.limit as number) ?? (input.size as number) ?? 20,
+              offset: (input.offset as number) ?? 0,
+            };
+
+            const searchKey = (input.search_term ?? input.search_key) as string | undefined;
+            if (typeof searchKey === "string" && searchKey.trim()) {
+              body.searchKey = searchKey.trim();
+            }
+
+            const perspectiveNames = normalizePerspectiveIdFilterValues(input.perspective_name);
+            if (perspectiveNames.length > 0) {
+              body.perspectiveNames = perspectiveNames;
+            }
+
+            return body;
+          },
+          responseExtractor: ccmBudgetListCompactExtract,
+          description:
+            "List budgets. Filter by search_term (name) or perspective_name. " +
+            "Returns budget health: actualCost vs budgetAmount, forecastCost, timeLeft, alerts.",
+        },
+        get: {
+          method: "POST",
+          path: "/ccm/api/graphql",
+          bodyBuilder: (input) => ({
+            query: BUDGET_GRID_DATA_QUERY,
+            operationName: "FetchBudgetsGridData",
+            variables: {
+              id: input.budget_id as string,
+              breakdown: (input.breakdown as string) ?? "MONTHLY",
+            },
+          }),
+          responseExtractor: ccmBudgetDetailExtract,
+          description:
+            "Get budget detail with time-series: actual vs budgeted per period with variance tracking. " +
+            "Pass budget_id from list. Optional breakdown: MONTHLY (default) or YEARLY.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 9. cost_overview — REST overview endpoint
     // ------------------------------------------------------------------
     {
       resourceType: "cost_overview",
@@ -1434,16 +1626,27 @@ Supports the same group_by dimensions as cost_breakdown (${VALID_GROUP_BY_FIELDS
     },
 
     // ------------------------------------------------------------------
-    // 9. cost_metadata — GraphQL CCM metadata
+    // 10. cost_metadata — GraphQL CCM metadata (bootstrap query)
     // ------------------------------------------------------------------
     {
       resourceType: "cost_metadata",
       displayName: "Cost Metadata",
-      description: "CCM metadata — available connectors, default perspective IDs, currency preferences. Supports get.",
+      description: "CCM metadata — available connectors, default perspective IDs, currency preferences. Start every session with this to discover what's available. Supports both harness_list and harness_get (same result).",
       toolset: "ccm",
       scope: "account",
       identifierFields: [],
       operations: {
+        list: {
+          method: "POST",
+          path: "/ccm/api/graphql",
+          bodyBuilder: () => ({
+            query: CCM_METADATA_QUERY,
+            operationName: "FetchCcmMetaData",
+            variables: {},
+          }),
+          responseExtractor: gqlExtract("ccmMetaData"),
+          description: "Get CCM metadata (available connectors, default perspectives, currency). No filters needed.",
+        },
         get: {
           method: "POST",
           path: "/ccm/api/graphql",
