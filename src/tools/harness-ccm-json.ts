@@ -5,15 +5,15 @@ import { jsonResult, errorResult } from "../utils/response-formatter.js";
 import { normalizeCcmJsonToChartSpec } from "../utils/ccm-chart-spec.js";
 
 /**
- * Normalize CCM API JSON (or chart-ready JSON) into a compact spec for harness_ccm_chart.
+ * Normalize CCM API JSON (or chart-ready JSON) into a compact spec for harness_ccm_finops_chart.
  * No network calls; no image output.
  */
 export function registerCcmJsonTool(server: McpServer, config: Config): void {
   server.registerTool(
-    "harness_ccm_json",
+    "harness_ccm_finops_json",
     {
       description:
-        "Parse CCM-related JSON (e.g. output from harness_list cost_breakdown, cost_timeseries, or a hand-authored { kind, points }) and return a normalized chart spec { kind, title?, points } for harness_ccm_chart. Strips unsafe characters from labels. Does not call Harness APIs.",
+        "Parse CCM-related JSON (e.g. output from harness_ccm_finops_list cost_breakdown, cost_timeseries, or a hand-authored { kind, points }) and return a normalized chart spec { kind, title?, points } for harness_ccm_finops_chart. Strips unsafe characters from labels. Does not call Harness APIs.",
       inputSchema: {
         json: z
           .string()
@@ -50,7 +50,7 @@ export function registerCcmJsonTool(server: McpServer, config: Config): void {
       return jsonResult({
         ok: true,
         spec: result.spec,
-        hint: "Pass spec to harness_ccm_chart as chart_spec, or use harness_ccm_chart with ccm_json directly.",
+        hint: "Pass spec to harness_ccm_finops_chart as chart_spec, or use harness_ccm_finops_chart with ccm_json directly.",
       });
     },
   );

@@ -2,40 +2,15 @@
  * Core types for the resource registry and dispatch system.
  */
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
 
-export type ToolsetName =
-  | "pipelines"
-  | "services"
-  | "environments"
-  | "infrastructure"
-  | "connectors"
-  | "secrets"
-  | "logs"
-  | "audit"
-  | "delegates"
-  | "repositories"
-  | "registries"
-  | "templates"
-  | "dashboards"
-  | "idp"
-  | "pull-requests"
-  | "feature-flags"
-  | "gitops"
-  | "chaos"
-  | "ccm"
-  | "sei"
-  | "scs"
-  | "sto"
-  | "access_control"
-  | "settings"
-  | "platform";
+export type ToolsetName = "ccm";
 
-export type OperationName = "list" | "get" | "create" | "update";
+export type OperationName = "list" | "get";
 
 /**
  * Lightweight field descriptor for body schemas.
- * Pure data (not Zod) — serializable to JSON for harness_describe output.
+ * Pure data (not Zod) — serializable to JSON for harness_ccm_finops_describe output.
  */
 export interface BodyFieldSpec {
   /** Field name as the API expects it */
@@ -94,9 +69,9 @@ export interface EndpointSpec {
   headers?: Record<string, string>;
   /** For GET: extract the useful part from the raw response */
   responseExtractor?: (raw: unknown) => unknown;
-  /** Description shown in harness_describe output */
+  /** Description shown in harness_ccm_finops_describe output */
   description?: string;
-  /** Optional body schema for write operations — exposed via harness_describe */
+  /** Optional body schema for write operations — exposed via harness_ccm_finops_describe */
   bodySchema?: BodySchema;
   /**
    * When the bodyBuilder wraps user fields inside a single key
@@ -114,7 +89,7 @@ export interface ResourceDefinition {
   resourceType: string;
   /** Human-readable name: "Pipeline", "Service", etc. */
   displayName: string;
-  /** Brief description for harness_describe output */
+  /** Brief description for harness_ccm_finops_describe output */
   description: string;
   /** Which toolset this resource belongs to (for HARNESS_TOOLSETS filtering) */
   toolset: ToolsetName;

@@ -22,9 +22,9 @@ export function registerRightsizingPrompt(server: McpServer): void {
             text: `Review rightsizing recommendations and help take action on them.${savingsNote}
 
 Steps:
-1. **Get stats**: Call harness_get with resource_type="cost_recommendation_stats"${projectFilter} to get overall recommendation summary
-2. **By type**: Call harness_list with resource_type="cost_recommendation_by_type"${projectFilter} to see recommendations grouped by type (resize, terminate, etc.)
-3. **Full list**: Call harness_list with resource_type="cost_recommendation"${projectFilter} to get all individual recommendations
+1. **Get stats**: Call harness_ccm_finops_get with resource_type="cost_recommendation_stats"${projectFilter} to get overall recommendation summary
+2. **By type**: Call harness_ccm_finops_list with resource_type="cost_recommendation_by_type"${projectFilter} to see recommendations grouped by type (resize, terminate, etc.)
+3. **Full list**: Call harness_ccm_finops_list with resource_type="cost_recommendation"${projectFilter} to get all individual recommendations
 4. **Rank and present**: Create a prioritized table sorted by monthly savings:
    - **Resource**: Name and type of the over-provisioned resource
    - **Current**: Current instance type/size
@@ -36,10 +36,7 @@ Steps:
    - Suggest implementation order (low-risk first)
    - Note any that need load testing before applying
 
-To take action on approved recommendations, I can:
-- Update recommendation state using harness_execute with resource_type="cost_recommendation", action="update_state"
-- Create a Jira ticket using action="create_jira_ticket"
-- Create a ServiceNow ticket using action="create_snow_ticket"
+After analysis, present the prioritized recommendations to the user with estimated savings and impact assessment.
 
 Present recommendations for review before taking any action.`,
           },

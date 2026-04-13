@@ -4,12 +4,14 @@
  * Tests the full request flow from Registry dispatch through HarnessClient
  * to mocked fetch responses, validating URL construction, auth headers,
  * query params, body building, response extraction, and error handling.
+ *
+ * Registry is CCM-only (`HARNESS_TOOLSETS=ccm`): account-scoped cost APIs,
+ * no org/project injection on dispatch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { HarnessClient } from "../../src/client/harness-client.js";
 import { Registry } from "../../src/registry/index.js";
 import type { Config } from "../../src/config.js";
-import { HarnessApiError } from "../../src/utils/errors.js";
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -21,6 +23,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     HARNESS_API_TIMEOUT_MS: 5000,
     HARNESS_MAX_RETRIES: 0, // No retries for tests
     LOG_LEVEL: "error",
+    HARNESS_TOOLSETS: "ccm",
     ...overrides,
   };
 }
@@ -32,7 +35,7 @@ function mockFetchResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe("Integration: Registry → HarnessClient → fetch", () => {
+describe("Integration: Registry → HarnessClient → fetch (CCM)", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -43,18 +46,19 @@ describe("Integration: Registry → HarnessClient → fetch", () => {
     fetchSpy.mockRestore();
   });
 
-  describe("pipeline list", () => {
-    it("sends correct URL, headers, and body for pipeline list", async () => {
+  describe("cost_perspective list", () => {
+    it("sends POST GraphQL with account routing and maps perspectives response", async () => {
       fetchSpy.mockResolvedValueOnce(
         mockFetchResponse({
-          status: "SUCCESS",
           data: {
-            content: [
-              { identifier: "deploy-prod", name: "Deploy to Production" },
-              { identifier: "build-test", name: "Build and Test" },
-            ],
-            totalElements: 2,
-            totalPages: 1,
+            perspectives: {
+              views: [
+                { id: "pv-aws", name: "AWS Default", viewType: "CUSTOMER" },
+                { id: "pv-gcp", name: "GCP Default", viewType: "CUSTOMER" },
+              ],
+              totalCount: 2,
+            },
+            __typename: "Query",
           },
         }),
       );
@@ -63,48 +67,54 @@ describe("Integration: Registry → HarnessClient → fetch", () => {
       const client = new HarnessClient(config);
       const registry = new Registry(config);
 
-      const result = (await registry.dispatch(client, "pipeline", "list", {
-        search_term: "deploy",
+      const result = (await registry.dispatch(client, "cost_perspective", "list", {
+        search_term: "GCP",
         page: 0,
         size: 10,
       })) as { items: unknown[]; total: number };
 
-      // Verify fetch was called
       expect(fetchSpy).toHaveBeenCalledOnce();
       const [url, options] = fetchSpy.mock.calls[0]!;
       const urlStr = url instanceof URL ? url.toString() : String(url);
 
-      // Verify URL structure
       expect(urlStr).toContain("app.harness.io");
-      expect(urlStr).toContain("/pipeline/api/pipelines/list");
-      expect(urlStr).toContain("orgIdentifier=default");
-      expect(urlStr).toContain("projectIdentifier=test-project");
-      expect(urlStr).toContain("searchTerm=deploy");
-      expect(urlStr).toContain("page=0");
-      expect(urlStr).toContain("size=10");
+      expect(urlStr).toContain("/ccm/api/graphql");
+      expect(urlStr).toContain("accountIdentifier=testaccount");
+      expect(urlStr).toContain("routingId=testaccount");
+      expect(urlStr).not.toContain("orgIdentifier=");
+      expect(urlStr).not.toContain("projectIdentifier=");
 
-      // Verify auth header
       const headers = (options as RequestInit)?.headers as Record<string, string>;
       expect(headers["x-api-key"]).toBe("pat.testaccount.tokenid.secret");
 
-      // Verify method
       expect((options as RequestInit)?.method).toBe("POST");
 
-      // Verify response extraction
+      const bodyRaw = (options as RequestInit)?.body;
+      expect(typeof bodyRaw).toBe("string");
+      const body = JSON.parse(bodyRaw as string) as {
+        operationName?: string;
+        variables?: { searchKey?: string; pageNo?: number; pageSize?: number };
+      };
+      expect(body.operationName).toBe("FetchAllPerspectives");
+      expect(body.variables?.searchKey).toBe("GCP");
+      expect(body.variables?.pageNo).toBe(0);
+      expect(body.variables?.pageSize).toBe(10);
+
       expect(result.items).toHaveLength(2);
       expect(result.total).toBe(2);
     });
   });
 
-  describe("pipeline get", () => {
-    it("resolves path params and extracts response", async () => {
+  describe("cost_perspective get", () => {
+    it("uses GET /ccm/api/perspective with perspectiveId and extracts data", async () => {
       fetchSpy.mockResolvedValueOnce(
         mockFetchResponse({
           status: "SUCCESS",
           data: {
-            identifier: "my-pipeline",
-            name: "My Pipeline",
-            yamlPipeline: "pipeline:\n  name: My Pipeline",
+            id: "pv-1",
+            name: "GCP Default",
+            viewType: "CUSTOMER",
+            dataSources: ["GCP"],
           },
         }),
       );
@@ -113,21 +123,24 @@ describe("Integration: Registry → HarnessClient → fetch", () => {
       const client = new HarnessClient(config);
       const registry = new Registry(config);
 
-      const result = (await registry.dispatch(client, "pipeline", "get", {
-        pipeline_id: "my-pipeline",
+      const result = (await registry.dispatch(client, "cost_perspective", "get", {
+        perspective_id: "pv-1",
       })) as Record<string, unknown>;
 
-      const [url] = fetchSpy.mock.calls[0]!;
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const [url, options] = fetchSpy.mock.calls[0]!;
       const urlStr = String(url);
 
-      // Path param substitution
-      expect(urlStr).toContain("/pipeline/api/pipelines/my-pipeline");
-      // Scope params present
-      expect(urlStr).toContain("orgIdentifier=default");
+      expect(urlStr).toContain("/ccm/api/perspective");
+      expect(urlStr).toContain("perspectiveId=pv-1");
+      expect(urlStr).toContain("accountIdentifier=testaccount");
+      expect(urlStr).toContain("routingId=testaccount");
+      expect(urlStr).not.toContain("orgIdentifier=");
 
-      // Response extracted from data wrapper
-      expect(result.identifier).toBe("my-pipeline");
-      expect(result.yamlPipeline).toBeDefined();
+      expect((options as RequestInit)?.method).toBe("GET");
+
+      expect(result.id).toBe("pv-1");
+      expect(result.name).toBe("GCP Default");
     });
   });
 
@@ -150,17 +163,10 @@ describe("Integration: Registry → HarnessClient → fetch", () => {
       const registry = new Registry(config);
 
       await expect(
-        registry.dispatch(client, "pipeline", "list", {}),
-      ).rejects.toThrow(HarnessApiError);
-
-      try {
-        await registry.dispatch(client, "pipeline", "list", {});
-      } catch (err) {
-        // The first call already threw — this will too, but let's catch for assertion
-        if (err instanceof HarnessApiError) {
-          expect(err.statusCode).toBe(401);
-        }
-      }
+        registry.dispatch(client, "cost_perspective", "list", {}),
+      ).rejects.toMatchObject({
+        statusCode: 401,
+      });
     });
 
     it("throws HarnessApiError for 404 not found", async () => {
@@ -169,7 +175,7 @@ describe("Integration: Registry → HarnessClient → fetch", () => {
           {
             status: "ERROR",
             code: "RESOURCE_NOT_FOUND",
-            message: "Pipeline not found",
+            message: "Perspective not found",
           },
           404,
         ),
@@ -179,38 +185,34 @@ describe("Integration: Registry → HarnessClient → fetch", () => {
       const client = new HarnessClient(config);
       const registry = new Registry(config);
 
-      try {
-        await registry.dispatch(client, "pipeline", "get", { pipeline_id: "missing" });
-        expect.unreachable();
-      } catch (err) {
-        expect(err).toBeInstanceOf(HarnessApiError);
-        expect((err as HarnessApiError).statusCode).toBe(404);
-      }
+      await expect(
+        registry.dispatch(client, "cost_perspective", "get", { perspective_id: "missing" }),
+      ).rejects.toMatchObject({
+        statusCode: 404,
+      });
     });
 
     it("throws HarnessApiError for 500 server error", async () => {
-      fetchSpy.mockResolvedValueOnce(
-        mockFetchResponse({ status: "ERROR", message: "Internal server error" }, 500),
-      );
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({ status: "ERROR", message: "Internal server error" }, 500));
 
       const config = makeConfig();
       const client = new HarnessClient(config);
       const registry = new Registry(config);
 
-      try {
-        await registry.dispatch(client, "pipeline", "list", {});
-        expect.unreachable();
-      } catch (err) {
-        expect(err).toBeInstanceOf(HarnessApiError);
-        expect((err as HarnessApiError).statusCode).toBe(500);
-      }
+      await expect(registry.dispatch(client, "cost_perspective", "list", {})).rejects.toMatchObject({
+        statusCode: 500,
+      });
     });
   });
 
-  describe("scope injection", () => {
-    it("injects org and project for project-scoped resources", async () => {
+  describe("account-scoped CCM dispatch", () => {
+    it("does not inject org or project query params for account-scoped resources", async () => {
       fetchSpy.mockResolvedValueOnce(
-        mockFetchResponse({ status: "SUCCESS", data: { content: [], totalElements: 0 } }),
+        mockFetchResponse({
+          data: {
+            perspectives: { views: [], totalCount: 0 },
+          },
+        }),
       );
 
       const config = makeConfig({
@@ -220,105 +222,13 @@ describe("Integration: Registry → HarnessClient → fetch", () => {
       const client = new HarnessClient(config);
       const registry = new Registry(config);
 
-      await registry.dispatch(client, "pipeline", "list", {});
+      await registry.dispatch(client, "cost_perspective", "list", {});
 
       const [url] = fetchSpy.mock.calls[0]!;
       const urlStr = String(url);
-      expect(urlStr).toContain("orgIdentifier=my-org");
-      expect(urlStr).toContain("projectIdentifier=my-project");
-    });
-
-    it("allows overriding org and project via input", async () => {
-      fetchSpy.mockResolvedValueOnce(
-        mockFetchResponse({ status: "SUCCESS", data: { content: [], totalElements: 0 } }),
-      );
-
-      const config = makeConfig();
-      const client = new HarnessClient(config);
-      const registry = new Registry(config);
-
-      await registry.dispatch(client, "pipeline", "list", {
-        org_id: "custom-org",
-        project_id: "custom-project",
-      });
-
-      const [url] = fetchSpy.mock.calls[0]!;
-      const urlStr = String(url);
-      expect(urlStr).toContain("orgIdentifier=custom-org");
-      expect(urlStr).toContain("projectIdentifier=custom-project");
-    });
-  });
-
-  describe("body building", () => {
-    it("pipeline create sends YAML body with correct Content-Type", async () => {
-      fetchSpy.mockResolvedValueOnce(
-        mockFetchResponse({ status: "SUCCESS", data: { identifier: "new-pipe" } }),
-      );
-
-      const config = makeConfig();
-      const client = new HarnessClient(config);
-      const registry = new Registry(config);
-
-      const yaml = "pipeline:\n  name: New Pipeline\n  identifier: new-pipe";
-      await registry.dispatch(client, "pipeline", "create", {
-        body: { yamlPipeline: yaml },
-      });
-
-      const [, options] = fetchSpy.mock.calls[0]!;
-      const init = options as RequestInit;
-      const headers = init.headers as Record<string, string>;
-      expect(headers["Content-Type"]).toBe("application/yaml");
-      // Body is the raw YAML string
-      expect(init.body).toBe(yaml);
-    });
-  });
-
-  describe("execution lifecycle", () => {
-    it("list → get flow works end-to-end", async () => {
-      // List executions
-      fetchSpy.mockResolvedValueOnce(
-        mockFetchResponse({
-          status: "SUCCESS",
-          data: {
-            content: [
-              { planExecutionId: "exec-1", status: "Failed", pipelineIdentifier: "deploy" },
-            ],
-            totalElements: 1,
-          },
-        }),
-      );
-
-      const config = makeConfig();
-      const client = new HarnessClient(config);
-      const registry = new Registry(config);
-
-      const listResult = (await registry.dispatch(client, "execution", "list", {
-        status: "Failed",
-      })) as { items: Array<{ planExecutionId: string }> };
-
-      expect(listResult.items).toHaveLength(1);
-      const execId = listResult.items[0]!.planExecutionId;
-
-      // Get execution details
-      fetchSpy.mockResolvedValueOnce(
-        mockFetchResponse({
-          status: "SUCCESS",
-          data: {
-            pipelineExecutionSummary: {
-              planExecutionId: execId,
-              status: "Failed",
-              pipelineIdentifier: "deploy",
-              executionErrorInfo: { message: "Step 3 failed" },
-            },
-          },
-        }),
-      );
-
-      const getResult = (await registry.dispatch(client, "execution", "get", {
-        execution_id: execId,
-      })) as Record<string, unknown>;
-
-      expect(getResult).toBeDefined();
+      expect(urlStr).toContain("accountIdentifier=testaccount");
+      expect(urlStr).not.toContain("orgIdentifier=");
+      expect(urlStr).not.toContain("projectIdentifier=");
     });
   });
 });

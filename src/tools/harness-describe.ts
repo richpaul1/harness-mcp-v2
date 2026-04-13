@@ -5,7 +5,7 @@ import { jsonResult } from "../utils/response-formatter.js";
 
 export function registerDescribeTool(server: McpServer, registry: Registry): void {
   server.registerTool(
-    "harness_describe",
+    "harness_ccm_finops_describe",
     {
       description: "Describe available Harness resource types, their supported operations, and fields. No API call — returns local metadata only. Use this to discover what resource_types you can use with other harness_ tools.",
       inputSchema: {
@@ -66,8 +66,8 @@ export function registerDescribeTool(server: McpServer, registry: Registry): voi
           total_results: results.length,
           resource_types: results,
           hint: results.length > 0
-            ? "Call harness_describe with resource_type='<type>' for full details on a specific match."
-            : "No matches found. Try a broader term, or call harness_describe with no arguments to see all resource types.",
+            ? "Call harness_ccm_finops_describe with resource_type='<type>' for full details on a specific match."
+            : "No matches found. Try a broader term, or call harness_ccm_finops_describe with no arguments to see all resource types.",
         });
       }
 

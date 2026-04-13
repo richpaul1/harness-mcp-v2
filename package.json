@@ -1,11 +1,11 @@
 {
-  "name": "harness-mcp-v2",
-  "version": "0.6.2",
-  "description": "Give AI agents full access to the Harness.io platform — manage pipelines, deployments, feature flags, infrastructure, and 122+ resource types through 12 MCP tools",
+  "name": "harness-ccm-finops-mcp",
+  "version": "1.0.0",
+  "description": "FinOps Agent — AI-powered cloud cost management via Harness CCM. Analyze spend, budgets, anomalies, recommendations, and perspectives through MCP tools.",
   "type": "module",
   "main": "build/index.js",
   "bin": {
-    "harness-mcp-v2": "build/index.js"
+    "harness-ccm-finops-mcp": "build/index.js"
   },
   "files": [
     "build/"
@@ -21,18 +21,18 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "docker:build": "docker build -t harness-mcp-server .",
-    "docker:run": "docker run --rm -p 3000:3000 --env-file .env harness-mcp-server",
+    "docker:build": "docker build -t harness-ccm-finops-mcp .",
+    "docker:run": "docker run --rm -p 3000:3000 --env-file .env harness-ccm-finops-mcp",
     "prepublishOnly": "pnpm build"
   },
   "keywords": [
     "mcp",
     "harness",
-    "harness-io",
-    "ci-cd",
+    "harness-ccm",
+    "finops",
+    "cloud-cost-management",
     "model-context-protocol",
-    "ai-agent",
-    "devops"
+    "ai-agent"
   ],
   "license": "Apache-2.0",
   "repository": {

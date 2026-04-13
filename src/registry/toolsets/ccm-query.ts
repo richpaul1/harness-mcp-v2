@@ -5,7 +5,7 @@
  * built-in dimensions: region, product, AWS fields, etc.).
  *
  * **Cost category / business-mapping group-by is not static:** dimensions such as “Business Domains”
- * come from **`harness_list` `cost_category`** (live names and uuids). The server resolves those
+ * come from **`harness_ccm_finops_list` `cost_category`** (live names and uuids). The server resolves those
  * when you use `group_by: "business_domain"` plus optional `business_mapping_name` / ids — do not
  * add them to `CCM_GROUP_BY_FIELDS`.
  *
@@ -81,11 +81,11 @@ export const CCM_GROUP_BY_FIELDS = [
   "labelv2",
 ] as const;
 
-/** Query shape for cost_breakdown and cost_timeseries. Used by harness_list tool input. */
+/** Query shape for cost_breakdown and cost_timeseries. Used by harness_ccm_finops_list tool input. */
 export interface CCMListQuery {
-  /** Required. Get from harness_list cost_summary (no perspective_id) → default perspective ids, or harness_list cost_perspective. */
+  /** Required. Get from harness_ccm_finops_list cost_summary (no perspective_id) → default perspective ids, or harness_ccm_finops_list cost_perspective. */
   perspective_id: string;
-  /** Time range — typically one of {@link CCM_TIME_FILTERS}; see harness_describe for the full enum wired to the API. */
+  /** Time range — typically one of {@link CCM_TIME_FILTERS}; see harness_ccm_finops_describe for the full enum wired to the API. */
   time_filter?: string;
   /** Custom UTC window (epoch ms); when set with {@link end_time_ms}, overrides `time_filter`. */
   start_time_ms?: number;
@@ -139,6 +139,6 @@ export function requirePerspectiveId(
   }
   throw new Error(
     `${resourceType} requires perspective_id. ` +
-      "Resolve it first: call harness_list with resource_type 'cost_summary' and no perspective_id to get default perspective IDs (e.g. defaultAwsPerspectiveId), or harness_list resource_type 'cost_perspective' to list all; then pass perspective_id in the query object to this tool.",
+      "Resolve it first: call harness_ccm_finops_list with resource_type 'cost_summary' and no perspective_id to get default perspective IDs (e.g. defaultAwsPerspectiveId), or harness_ccm_finops_list resource_type 'cost_perspective' to list all; then pass perspective_id in the query object to this tool.",
   );
 }

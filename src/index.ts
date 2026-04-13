@@ -34,7 +34,7 @@ function createHarnessServer(config: Config): McpServer {
 
   const server = new McpServer(
     {
-      name: "harness-mcp-server",
+      name: "harness-ccm-finops-agent",
       version: "1.0.0",
       icons: [{ src: "https://app.harness.io/favicon.ico" }],
       websiteUrl: "https://harness.io",
@@ -56,7 +56,7 @@ async function startStdio(config: Config): Promise<void> {
   const server = createHarnessServer(config);
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  log.info("harness-mcp-server connected via stdio");
+  log.info("harness-ccm-finops-agent connected via stdio");
 
   const shutdown = async (signal: string): Promise<void> => {
     log.info(`Received ${signal}, closing stdio transport...`);
@@ -340,7 +340,7 @@ async function startHttp(config: Config, port: number): Promise<void> {
 
   // Graceful shutdown — drain in-flight requests, then close all sessions
   const httpServer = app.listen(port, host, () => {
-    log.info(`harness-mcp-server listening on http://${host}:${port}`);
+    log.info(`harness-ccm-finops-agent listening on http://${host}:${port}`);
     log.info(`  POST   /mcp    — MCP endpoint (session-based, DNS rebinding protected)`);
     log.info(`  GET    /mcp    — SSE stream (progress, elicitation)`);
     log.info(`  DELETE /mcp    — Terminate session`);
@@ -417,7 +417,7 @@ async function main(): Promise<void> {
 
   const { transport, port } = parseArgs();
 
-  log.info("Starting harness-mcp-server", {
+  log.info("Starting harness-ccm-finops-agent", {
     transport,
     baseUrl: config.HARNESS_BASE_URL,
     accountId: config.HARNESS_ACCOUNT_ID,

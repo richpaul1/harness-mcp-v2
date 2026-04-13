@@ -70,7 +70,7 @@ export function registerCcmBudgetHealthTool(
   client: HarnessClient,
 ): void {
   server.registerTool(
-    "harness_ccm_budget_health",
+    "harness_ccm_finops_budget_health",
     {
       description:
         "Classified budget health sweep. Calls cost_budget list internally and returns " +

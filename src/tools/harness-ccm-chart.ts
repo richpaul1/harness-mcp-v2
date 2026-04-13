@@ -17,10 +17,10 @@ function clampSize(n: number | undefined, fallback: number, max: number, min: nu
  */
 export function registerCcmChartTool(server: McpServer, config: Config): void {
   server.registerTool(
-    "harness_ccm_chart",
+    "harness_ccm_finops_chart",
     {
       description:
-        "Render a PNG chart from JSON. Pass chart_spec: bar/line { kind, title?, y_label?, points: [{ label, value }] }, or grouped_bar { kind: \"grouped_bar\", series: [{ key, label, color? }], points: [{ label, values: { [key]: number } }] } for side-by-side bars (e.g. current vs previous period). Or pass ccm_json (string) from CCM/harness_list — labels sanitized. Local rendering only; returns image/png. Use chart_size to pick medium (960×540) or large (1920×1080).",
+        "Render a PNG chart from JSON. Pass chart_spec: bar/line { kind, title?, y_label?, points: [{ label, value }] }, or grouped_bar { kind: \"grouped_bar\", series: [{ key, label, color? }], points: [{ label, values: { [key]: number } }] } for side-by-side bars (e.g. current vs previous period). Or pass ccm_json (string) from harness_ccm_finops_list — labels sanitized. Local rendering only; returns image/png. Use chart_size to pick medium (960×540) or large (1920×1080).",
       inputSchema: {
         chart_spec: z
           .record(z.string(), z.unknown())
@@ -28,7 +28,7 @@ export function registerCcmChartTool(server: McpServer, config: Config): void {
           .optional(),
         ccm_json: z
           .string()
-          .describe("Alternative: JSON string to normalize (same shapes as harness_ccm_json)")
+          .describe("Alternative: JSON string to normalize (same shapes as harness_ccm_finops_json)")
           .optional(),
         chart_size: z
           .enum(["medium", "large"])

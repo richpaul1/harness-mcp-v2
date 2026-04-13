@@ -41,11 +41,11 @@ export function registerCcmCostCategoryPeriodChartTool(
   config: Config,
 ): void {
   server.registerTool(
-    "harness_ccm_cost_category_period_chart",
+    "harness_ccm_finops_cost_category_chart",
     {
       description:
         "Render a grouped-bar PNG chart comparing cost by **cost category** across two consecutive UTC windows. " +
-        "Note: a single harness_list cost_breakdown call already returns both cost and costTrend (% change vs previous period) per row — use that for data-only comparisons. " +
+        "Note: a single harness_ccm_finops_list cost_breakdown call already returns both cost and costTrend (% change vs previous period) per row — use that for data-only comparisons. " +
         "This tool adds a visual chart: it calls cost_breakdown twice with explicit time windows to get absolute dollar values for both periods, then renders current (green) vs previous (red) bars. " +
         "Current window: last N days ending before an excluded trailing tail (default exclude 2 calendar days). " +
         "Previous window: the N days immediately before that. Requires CCM toolset.",
@@ -55,7 +55,7 @@ export function registerCcmCostCategoryPeriodChartTool(
           .string()
           .min(1)
           .describe(
-            "Exact cost category / business-mapping name to group by (e.g. from harness_list cost_category). Not limited to Business Domains.",
+            "Exact cost category / business-mapping name to group by (e.g. from harness_ccm_finops_list cost_category). Not limited to Business Domains.",
           ),
         exclude_last_days: z
           .number()

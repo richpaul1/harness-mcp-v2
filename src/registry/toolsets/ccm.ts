@@ -556,7 +556,7 @@ function readResourceTagFieldId(input?: Record<string, unknown>): string {
 
 /**
  * Built-in dimensions use OUTPUT_FIELDS. Cost categories (e.g. "Business Domains") are dynamic:
- * resolve uuid via `harness_list cost_category` (or server-side resolve from name), then pass
+ * resolve uuid via `harness_ccm_finops_list cost_category` (or server-side resolve from name), then pass
  * `business_mapping_field_id` + `business_mapping_field_name` on the request input.
  *
  * Resource tags (QLCE LABEL_V2): use group_by `resource_tag` (or `tag`, `tags`, `labels`, …) and pass
@@ -596,7 +596,7 @@ function buildGroupBy(field?: string, input?: Record<string, unknown>): Record<s
         : "Cost category";
     if (!fieldId) {
       throw new Error(
-        "group_by business_domain or cost_category requires business_mapping_field_id (uuid from harness_list cost_category). " +
+        "group_by business_domain or cost_category requires business_mapping_field_id (uuid from harness_ccm_finops_list cost_category). " +
           "Omit business_mapping_field_id only when the server can resolve it from business_mapping_name (default: Business Domains).",
       );
     }
@@ -667,7 +667,7 @@ export const ccmToolset: ToolsetDefinition = {
       resourceType: "cost_perspective",
       displayName: "Cost Perspective",
       description:
-        "A cloud cost perspective (saved view). Use harness_list to see all perspectives (including custom ones), harness_get for details. This is the starting point — get a perspective_id first, then use cost_breakdown or cost_timeseries to drill into costs.",
+        "A cloud cost perspective (saved view). Use harness_ccm_finops_list to see all perspectives (including custom ones), harness_ccm_finops_get for details. This is the starting point — get a perspective_id first, then use cost_breakdown or cost_timeseries to drill into costs.",
       toolset: "ccm",
       scope: "account",
       identifierFields: ["perspective_id"],
@@ -714,39 +714,6 @@ export const ccmToolset: ToolsetDefinition = {
           responseExtractor: ngExtract,
           description: "Get cost perspective details by ID — returns viewRules, viewPreferences (cost accounting settings), dataSources, viewVisualization (default groupBy/chart), totalCost, and creator info.",
         },
-        create: {
-          method: "POST",
-          path: "/ccm/api/perspective",
-          bodyBuilder: (input) => input.body,
-          bodySchema: {
-            description: "Cost perspective definition",
-            fields: [
-              { name: "name", type: "string", required: true, description: "Perspective name" },
-              { name: "viewVisualization", type: "object", required: false, description: "Chart type and group by configuration" },
-              { name: "viewRules", type: "array", required: false, description: "Filter rules for the perspective", itemType: "rule object" },
-              { name: "viewTimeRange", type: "object", required: false, description: "Time range settings" },
-            ],
-          },
-          responseExtractor: ngExtract,
-          description: "Create a new cost perspective",
-        },
-        update: {
-          method: "PUT",
-          path: "/ccm/api/perspective",
-          bodyBuilder: (input) => input.body,
-          bodySchema: {
-            description: "Cost perspective update",
-            fields: [
-              { name: "uuid", type: "string", required: true, description: "Perspective UUID (from get)" },
-              { name: "name", type: "string", required: true, description: "Perspective name" },
-              { name: "viewVisualization", type: "object", required: false, description: "Chart type and group by configuration" },
-              { name: "viewRules", type: "array", required: false, description: "Filter rules", itemType: "rule object" },
-              { name: "viewTimeRange", type: "object", required: false, description: "Time range settings" },
-            ],
-          },
-          responseExtractor: ngExtract,
-          description: "Update an existing cost perspective",
-        },
       },
     },
 
@@ -775,7 +742,7 @@ Optional: group_by (${VALID_GROUP_BY_FIELDS.join(", ")}), time_filter (${VALID_T
         { name: "start_time_ms", description: "Custom window start (epoch ms, UTC); use with end_time_ms for period comparisons" },
         { name: "end_time_ms", description: "Custom window end (epoch ms, UTC); must be greater than start_time_ms" },
         { name: "business_mapping_name", description: "Cost category name to resolve (default Business Domains); uuid used as group-by fieldId and for filter_cost_category_value scoping" },
-        { name: "business_mapping_field_id", description: "Cost category uuid from harness_list cost_category; required for group_by business_domain / cost_category if not auto-resolved" },
+        { name: "business_mapping_field_id", description: "Cost category uuid from harness_ccm_finops_list cost_category; required for group_by business_domain / cost_category if not auto-resolved" },
         {
           name: "filter_cost_category_value",
           description:
@@ -876,7 +843,7 @@ Optional: time_filter (${VALID_TIME_FILTERS.join(", ")}), start_time_ms/end_time
         { name: "end_time_ms", description: "Custom window end (epoch ms, UTC); must be greater than start_time_ms" },
         { name: "time_resolution", description: "Time resolution for aggregation", enum: ["DAY", "MONTH", "WEEK"] },
         { name: "business_mapping_name", description: "Cost category name to resolve (default Business Domains); uuid used as group-by fieldId and for filter_cost_category_value scoping" },
-        { name: "business_mapping_field_id", description: "Cost category uuid from harness_list cost_category; required for group_by business_domain / cost_category if not auto-resolved" },
+        { name: "business_mapping_field_id", description: "Cost category uuid from harness_ccm_finops_list cost_category; required for group_by business_domain / cost_category if not auto-resolved" },
         {
           name: "filter_cost_category_value",
           description:
@@ -1046,9 +1013,9 @@ Use with no perspective_id to get CCM metadata (available connectors, default pe
       displayName: "Cost Recommendation",
       description: `Cloud cost optimization recommendations. Answers "how do I reduce my cloud bill?"
 
-harness_list: Discover recommendations with rich filtering — by perspective, cost category, cloud provider, resource type, governance rule, tags, and more. Returns all resource types (EC2, Azure VM, ECS, Node Pool, Workload, Governance) in a single list. Strips verbose JIRA/ServiceNow payloads for clean output.
+harness_ccm_finops_list: Discover recommendations with rich filtering — by perspective, cost category, cloud provider, resource type, governance rule, tags, and more. Returns all resource types (EC2, Azure VM, ECS, Node Pool, Workload, Governance) in a single list. Strips verbose JIRA/ServiceNow payloads for clean output.
 
-harness_get: With resource_id (recommendation ID) → summary for that recommendation. With perspective_id via params → perspective-scoped recommendations with savings stats.`,
+harness_ccm_finops_get: With resource_id (recommendation ID) → summary for that recommendation. With perspective_id via params → perspective-scoped recommendations with savings stats.`,
       toolset: "ccm",
       scope: "account",
       identifierFields: ["recommendation_id"],
@@ -1477,7 +1444,7 @@ Supports the same group_by dimensions as cost_breakdown (${VALID_GROUP_BY_FIELDS
       identifierFields: ["category_id"],
       listFilterFields: [
         { name: "search_key", description: "Search text (maps to CCM searchKey)", type: "string" },
-        { name: "search_term", description: "Alias for search_key (same as harness_list search_term)", type: "string" },
+        { name: "search_term", description: "Alias for search_key (same as harness_ccm_finops_list search_term)", type: "string" },
         { name: "limit", description: "Page size (CCM query param; default 20)", type: "number" },
         { name: "offset", description: "Row offset for pagination (default 0)", type: "number" },
         {
@@ -1506,7 +1473,7 @@ Supports the same group_by dimensions as cost_breakdown (${VALID_GROUP_BY_FIELDS
           responseExtractor: ccmBusinessMappingListCompactExtract,
           description:
             "List cost categories / business mappings — returns uuid, name, dataSources, and timestamps only (lightweight). " +
-            "Use harness_get with the uuid to load full rule details (costTargets, conditions, shared costs).",
+            "Use harness_ccm_finops_get with the uuid to load full rule details (costTargets, conditions, shared costs).",
         },
         get: {
           method: "GET",
@@ -1528,8 +1495,8 @@ Supports the same group_by dimensions as cost_breakdown (${VALID_GROUP_BY_FIELDS
       displayName: "Cost Budget",
       description: `Cloud cost budgets — track spend vs budget, forecast overspend, and monitor alerts. Answers "are we on budget?" and "will we overspend?"
 
-harness_list: List budgets with optional search by name and perspective filtering. Returns budget health: actualCost vs budgetAmount, forecastCost, timeLeft, alerts.
-harness_get: Time-series detail for a specific budget — month-by-month (or yearly) actual vs budgeted with variance tracking. Pass budget_id (from list) and optional breakdown (MONTHLY or YEARLY).`,
+harness_ccm_finops_list: List budgets with optional search by name and perspective filtering. Returns budget health: actualCost vs budgetAmount, forecastCost, timeLeft, alerts.
+harness_ccm_finops_get: Time-series detail for a specific budget — month-by-month (or yearly) actual vs budgeted with variance tracking. Pass budget_id (from list) and optional breakdown (MONTHLY or YEARLY).`,
       toolset: "ccm",
       scope: "account",
       identifierFields: ["budget_id"],
@@ -1631,7 +1598,7 @@ harness_get: Time-series detail for a specific budget — month-by-month (or yea
     {
       resourceType: "cost_metadata",
       displayName: "Cost Metadata",
-      description: "CCM metadata — available connectors, default perspective IDs, currency preferences. Start every session with this to discover what's available. Supports both harness_list and harness_get (same result).",
+      description: "CCM metadata — available connectors, default perspective IDs, currency preferences. Start every session with this to discover what's available. Supports both harness_ccm_finops_list and harness_ccm_finops_get (same result).",
       toolset: "ccm",
       scope: "account",
       identifierFields: [],

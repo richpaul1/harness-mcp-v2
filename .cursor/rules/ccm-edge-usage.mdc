@@ -1,16 +1,17 @@
 ---
-description: CCM via ccm-edge MCP — bootstrap metadata, perspectives, cost categories, breakdown, anomalies, recommendations, charts, spike triage
+description: Harness CCM FinOps Agent — bootstrap metadata, perspectives, cost categories, breakdown, anomalies, recommendations, budgets, charts, spike triage
 alwaysApply: true
 ---
 
-# CCM Edge (`ccm-edge` MCP) — how to work
+# Harness CCM FinOps Agent — how to work
 
 MCP server: **`http://localhost:3000/mcp`**
+Tool prefix: **`harness_ccm_finops_`**
 ---
 
 ## 1. Bootstrap — discover what's available
 
-**Start every session** by calling `harness_list` (or `harness_get`) with `resource_type: "cost_metadata"` (no filters needed):
+**Start every session** by calling `harness_ccm_finops_list` (or `harness_ccm_finops_get`) with `resource_type: "cost_metadata"` (no filters needed):
 
 ```json
 {
@@ -33,14 +34,14 @@ Use this to:
 
 ## 2. Resolve perspective, then query
 
-1. **List all perspectives** (including custom ones): **`harness_list`** `resource_type: "cost_perspective"`. Search by name with `search_term`. Returns `id`, `name`, `viewType`, `dataSources`, etc.
-2. **Quick default perspective IDs:** Use `cost_metadata` (section 1) or **`harness_list`** `resource_type: "cost_summary"` with **no** `perspective_id`.
+1. **List all perspectives** (including custom ones): **`harness_ccm_finops_list`** `resource_type: "cost_perspective"`. Search by name with `search_term`. Returns `id`, `name`, `viewType`, `dataSources`, etc.
+2. **Quick default perspective IDs:** Use `cost_metadata` (section 1) or **`harness_ccm_finops_list`** `resource_type: "cost_summary"` with **no** `perspective_id`.
 3. Build queries with: `perspective_id`, `time_filter` (or `start_time_ms`/`end_time_ms`), **`group_by`** for rollups.
 4. **Resource types**
    - **`cost_breakdown`** — per-entity cost + costTrend (% change vs previous period). **One call = both periods.**
    - **`cost_timeseries`** — daily/weekly/monthly cost over time, grouped by dimension.
    - **`cost_summary`** — total cost, trend, idle, unallocated, efficiency score, forecast.
-   - **`cost_category`** — business mappings (list returns **name + uuid only**; use `harness_get` for full rules).
+   - **`cost_category`** — business mappings (list returns **name + uuid only**; use `harness_ccm_finops_get` for full rules).
    - **`cost_recommendation`** — optimization recommendations (see section 8).
    - **`cost_budget`** — budget tracking and variance analysis (see section 9).
 5. Never omit **`perspective_id`** where required.
@@ -86,7 +87,7 @@ If the user asks for **Usage only** (run-rate / usage-based cost):
 
 **Every cost query that returns data MUST include an inline chart.** Charts are not optional — they are the primary deliverable. Text summaries are supplementary.
 
-1. **Always chart:** After any `cost_breakdown`, `cost_timeseries`, `cost_summary`, or anomaly query that returns data, generate a chart with **`harness_ccm_chart`**. Do not skip this step.
+1. **Always chart:** After any `cost_breakdown`, `cost_timeseries`, `cost_summary`, or anomaly query that returns data, generate a chart with **`harness_ccm_finops_chart`**. Do not skip this step.
 2. **Chart kind:** Use **`kind_hint: "line"`** for daily/time series. Use **`kind_hint: "bar"`** or **`grouped_bar`** for comparisons and breakdowns.
 3. **Chart sizes:** `chart_size: "medium"` (960×540, default) or `chart_size: "large"` (1920×1080, 2× all dimensions). Use `"large"` for reports and triage documents.
 4. **Inline first:** The tool returns `image/png` — present it so the user sees the chart directly in the chat. This is the primary output.
@@ -98,7 +99,7 @@ If the user asks for **Usage only** (run-rate / usage-based cost):
 
 ## 6. Cost spike investigation — repeatable pattern
 
-Use this **same sequence** whenever the user asks what drove a **spike**, **day-over-day jump**, or **period vs period** increase. Adapt dimensions to the cloud (below defaults to **GCP**; substitute AWS fields from `harness_describe`).
+Use this **same sequence** whenever the user asks what drove a **spike**, **day-over-day jump**, or **period vs period** increase. Adapt dimensions to the cloud (below defaults to **GCP**; substitute AWS fields from `harness_ccm_finops_describe`).
 
 ### A. Lock the question
 
@@ -134,7 +135,7 @@ Use this **same sequence** whenever the user asks what drove a **spike**, **day-
 
 ### G. Chart for the user
 
-1. Build **`chart_spec`** from the series in E → **`harness_ccm_chart`** with `chart_size: "large"` for reports.
+1. Build **`chart_spec`** from the series in E → **`harness_ccm_finops_chart`** with `chart_size: "large"` for reports.
 2. Deliver **inline**; use `output_path` when creating triage reports.
 
 ### H. Short checklist
@@ -143,7 +144,7 @@ Use this **same sequence** whenever the user asks what drove a **spike**, **day-
 
 ### Creating markdown reports
 1. **Always include the original user prompt** at the top under `## Request`.
-2. Use `harness_ccm_chart` with `output_path: "triage/assets/<filename>.png"` to save chart PNGs to disk in the same call.
+2. Use `harness_ccm_finops_chart` with `output_path: "triage/assets/<filename>.png"` to save chart PNGs to disk in the same call.
 
 ---
 
@@ -153,9 +154,9 @@ Use this when the user asks about **anomalies**, **unexpected spikes**, or **ale
 
 | Step | Resource Type | Tool | Purpose |
 |------|--------------|------|---------|
-| 1 | `cost_anomaly_summary` | `harness_list` | Anomaly counts by dimension + day |
-| 2 | `cost_anomaly` | `harness_list` | Individual anomaly records (drill into a day) |
-| 3 | `cost_anomaly` | `harness_get` | Full details for one anomaly |
+| 1 | `cost_anomaly_summary` | `harness_ccm_finops_list` | Anomaly counts by dimension + day |
+| 2 | `cost_anomaly` | `harness_ccm_finops_list` | Individual anomaly records (drill into a day) |
+| 3 | `cost_anomaly` | `harness_ccm_finops_get` | Full details for one anomaly |
 
 ---
 
@@ -225,7 +226,7 @@ Returns: full anomaly record including `dailyBreakdown`, expected cost bounds, `
 3. **Step 3** (`cost_anomaly` get): fetch full detail for top anomaly `id`(s).
 4. **Re-drill** Step 2 with finer `group_by` (e.g. `gcp_product` → `gcp_project_id` → `gcp_sku_description`).
 5. Cross-reference with `cost_timeseries` / `cost_breakdown` to determine one-off vs persistent.
-6. Chart anomalous spend if helpful (`harness_ccm_chart`).
+6. Chart anomalous spend if helpful (`harness_ccm_finops_chart`).
 
 ---
 
@@ -235,12 +236,12 @@ Use this when the user asks about **recommendations**, **savings opportunities**
 
 | Step | Operation | Tool | Purpose |
 |------|-----------|------|---------|
-| 1 | `cost_recommendation` list | `harness_list` | Discover recommendations with rich filters |
-| 2 | `cost_recommendation` get | `harness_get` | Summary for a single recommendation by ID |
+| 1 | `cost_recommendation` list | `harness_ccm_finops_list` | Discover recommendations with rich filters |
+| 2 | `cost_recommendation` get | `harness_ccm_finops_get` | Summary for a single recommendation by ID |
 
 ---
 
-### Step 1 — List recommendations (`harness_list` → `cost_recommendation`)
+### Step 1 — List recommendations (`harness_ccm_finops_list` → `cost_recommendation`)
 
 Find recommendations, optionally scoped by perspective, cost category, cloud provider, or resource type:
 
@@ -329,7 +330,7 @@ Returns per item: `id`, `resourceName`, `monthlySaving`, `monthlyCost`, `resourc
 
 ---
 
-### Step 2 — Get recommendation summary (`harness_get` → `cost_recommendation`)
+### Step 2 — Get recommendation summary (`harness_ccm_finops_get` → `cost_recommendation`)
 
 Fetch summary and savings stats for a single recommendation by its `id`:
 
@@ -368,7 +369,7 @@ When analyzing costs for a business unit or cost category, find related recommen
 
 **3. Explain a recommendation to the user:**
 - From the list, take the `id`
-- Call `harness_get` with `resource_id` to get savings stats
+- Call `harness_ccm_finops_get` with `resource_id` to get savings stats
 - Explain: resource name, monthly cost, potential savings, resource type
 
 **4. Cross-reference with cost data:**
@@ -384,12 +385,12 @@ Use this when the user asks about **budgets**, **overspend**, **budget health**,
 
 | Step | Operation | Tool | Purpose |
 |------|-----------|------|---------|
-| 1 | `cost_budget` list | `harness_list` | Discover budgets, check health |
-| 2 | `cost_budget` get | `harness_get` | Time-series detail for a specific budget |
+| 1 | `cost_budget` list | `harness_ccm_finops_list` | Discover budgets, check health |
+| 2 | `cost_budget` get | `harness_ccm_finops_get` | Time-series detail for a specific budget |
 
 ---
 
-### Step 1 — List budgets (`harness_list` → `cost_budget`)
+### Step 1 — List budgets (`harness_ccm_finops_list` → `cost_budget`)
 
 List all budgets, optionally filtered by name or perspective:
 
@@ -429,7 +430,7 @@ Returns per item: `id`, `name`, `perspectiveId`, `perspectiveName`, `budgetAmoun
 
 ---
 
-### Step 2 — Budget detail (`harness_get` → `cost_budget`)
+### Step 2 — Budget detail (`harness_ccm_finops_get` → `cost_budget`)
 
 Get month-by-month (or yearly) actual vs budgeted with variance tracking:
 
@@ -473,7 +474,7 @@ The **last entry** in `costData` is typically the current (incomplete) period.
 
 **2. Budget vs actuals trend:**
 - Get `cost_budget` with `budget_id` → `costData[]` shows month-by-month variance
-- Chart with `harness_ccm_chart`: budgeted as reference line, actualCost as bars
+- Chart with `harness_ccm_finops_chart`: budgeted as reference line, actualCost as bars
 - Highlight months where `budgetVariance > 0` (over budget)
 
 **3. Cross-reference with cost analysis:**
@@ -489,11 +490,11 @@ The **last entry** in `costData` is typically the current (incomplete) period.
 
 ## 10. Budget health sweep — one-call risk assessment
 
-For **monthly FinOps health checks**, **budget reviews**, or **"are we on budget?"** questions, use `harness_ccm_budget_health` instead of manually processing `cost_budget` list output.
+For **monthly FinOps health checks**, **budget reviews**, or **"are we on budget?"** questions, use `harness_ccm_finops_budget_health` instead of manually processing `cost_budget` list output.
 
 ```json
 {
-  "tool": "harness_ccm_budget_health"
+  "tool": "harness_ccm_finops_budget_health"
 }
 ```
 
@@ -501,7 +502,7 @@ With filters:
 
 ```json
 {
-  "tool": "harness_ccm_budget_health",
+  "tool": "harness_ccm_finops_budget_health",
   "perspective_name": "Domain - GPS",
   "period": "MONTHLY",
   "min_budget": 1000
@@ -516,7 +517,7 @@ With filters:
 
 Each item includes: `name`, `perspective`, `period`, `budget_amount`, `actual_cost`, `forecast_cost`, `pct_actual`, `pct_forecast`, `time_left_days`, and either `overage` or `projected_overrun`.
 
-**Chart the results:** pass `over_budget` + `at_risk` arrays directly to `harness_ccm_chart` as bar chart data — e.g. budget vs actual vs forecast grouped bars.
+**Chart the results:** pass `over_budget` + `at_risk` arrays directly to `harness_ccm_finops_chart` as bar chart data — e.g. budget vs actual vs forecast grouped bars.
 
 ---
 

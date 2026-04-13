@@ -11,7 +11,7 @@ import { buildLogPrefixFromExecution } from "../utils/log-prefix.js";
 
 export function registerGetTool(server: McpServer, registry: Registry, client: HarnessClient): void {
   server.registerTool(
-    "harness_get",
+    "harness_ccm_finops_get",
     {
       description: "Get a Harness resource by ID. Accepts a Harness URL to auto-extract identifiers. For failure analysis, prefer harness_diagnose.",
       inputSchema: {
@@ -20,7 +20,7 @@ export function registerGetTool(server: McpServer, registry: Registry, client: H
         url: z.string().describe("Harness UI URL — auto-extracts org, project, type, and ID").optional(),
         org_id: z.string().describe("Organization identifier (overrides default)").optional(),
         project_id: z.string().describe("Project identifier (overrides default)").optional(),
-        params: z.record(z.string(), z.unknown()).describe("Additional identifiers for nested resources. Call harness_describe for fields per resource_type.").optional(),
+        params: z.record(z.string(), z.unknown()).describe("Additional identifiers for nested resources. Call harness_ccm_finops_describe for fields per resource_type.").optional(),
       },
       annotations: {
         title: "Get Harness Resource",

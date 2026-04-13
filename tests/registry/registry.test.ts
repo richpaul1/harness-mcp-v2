@@ -29,15 +29,13 @@ describe("Registry", () => {
     it("loads all toolsets when HARNESS_TOOLSETS is not set", () => {
       const registry = new Registry(makeConfig());
       const desc = registry.describe() as { total_toolsets: number };
-      // There are 23 toolsets imported in registry/index.ts (including access_control)
-      // But ToolsetName only has 22 entries. Let's just check it loaded many.
-      expect(desc.total_toolsets).toBeGreaterThanOrEqual(20);
+      expect(desc.total_toolsets).toBe(1);
     });
 
     it("filters to specific toolsets when HARNESS_TOOLSETS is set", () => {
-      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines,services" }));
+      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
       const desc = registry.describe() as { total_toolsets: number };
-      expect(desc.total_toolsets).toBe(2);
+      expect(desc.total_toolsets).toBe(1);
     });
 
     it("throws for invalid toolset names in HARNESS_TOOLSETS", () => {
@@ -46,39 +44,40 @@ describe("Registry", () => {
       );
     });
 
-    it("throws for typo in toolset name (e.g. 'pipeline' instead of 'pipelines')", () => {
-      expect(() => new Registry(makeConfig({ HARNESS_TOOLSETS: "pipeline" }))).toThrow(
-        /Invalid HARNESS_TOOLSETS: "pipeline"/,
+    it("throws for typo in toolset name (e.g. 'cost' instead of 'ccm')", () => {
+      expect(() => new Registry(makeConfig({ HARNESS_TOOLSETS: "cost" }))).toThrow(
+        /Invalid HARNESS_TOOLSETS: "cost"/,
       );
-      expect(() => new Registry(makeConfig({ HARNESS_TOOLSETS: "pipeline" }))).toThrow(
+      expect(() => new Registry(makeConfig({ HARNESS_TOOLSETS: "cost" }))).toThrow(
         /Valid toolset names:/,
       );
     });
 
     it("throws listing all invalid names when multiple are wrong", () => {
-      expect(() => new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines,badname,services,oops" }))).toThrow(
-        /Invalid HARNESS_TOOLSETS: "badname", "oops"/,
+      expect(() => new Registry(makeConfig({ HARNESS_TOOLSETS: "badname,cost,oops" }))).toThrow(
+        /Invalid HARNESS_TOOLSETS: "badname", "cost", "oops"/,
       );
     });
 
-    it("accepts all valid toolset names without error", () => {
-      // Just use a few known-good names
-      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines,services,connectors" }));
+    it("accepts the valid toolset name without error", () => {
+      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
       const desc = registry.describe() as { total_toolsets: number };
-      expect(desc.total_toolsets).toBe(3);
+      expect(desc.total_toolsets).toBe(1);
     });
   });
 
   describe("getResource", () => {
     let registry: Registry;
     beforeEach(() => {
-      registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines" }));
+      registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
     });
 
     it("returns a resource definition for a valid type", () => {
-      const def = registry.getResource("pipeline");
-      expect(def.resourceType).toBe("pipeline");
-      expect(def.displayName).toBe("Pipeline");
+      const def = registry.getResource("cost_perspective");
+      expect(def.resourceType).toBe("cost_perspective");
+      expect(def.displayName).toBe("Cost Perspective");
+      expect(def.scope).toBe("account");
+      expect(def.identifierFields).toEqual(["perspective_id"]);
     });
 
     it("throws for unknown resource type with available list", () => {
@@ -89,11 +88,10 @@ describe("Registry", () => {
 
   describe("getAllResourceTypes", () => {
     it("returns sorted array of resource types", () => {
-      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines" }));
+      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
       const types = registry.getAllResourceTypes();
       expect(Array.isArray(types)).toBe(true);
-      expect(types).toContain("pipeline");
-      // Verify sorted
+      expect(types).toContain("cost_perspective");
       const sorted = [...types].sort();
       expect(types).toEqual(sorted);
     });
@@ -102,16 +100,16 @@ describe("Registry", () => {
   describe("supportsOperation", () => {
     let registry: Registry;
     beforeEach(() => {
-      registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines" }));
+      registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
     });
 
     it("returns true for supported operation", () => {
-      expect(registry.supportsOperation("pipeline", "list")).toBe(true);
-      expect(registry.supportsOperation("pipeline", "get")).toBe(true);
+      expect(registry.supportsOperation("cost_perspective", "list")).toBe(true);
+      expect(registry.supportsOperation("cost_perspective", "get")).toBe(true);
     });
 
     it("returns false for unsupported operation", () => {
-      expect(registry.supportsOperation("pipeline", "nonexistent" as any)).toBe(false);
+      expect(registry.supportsOperation("cost_perspective", "nonexistent" as never)).toBe(false);
     });
 
     it("returns false for unknown resource type", () => {
@@ -121,47 +119,45 @@ describe("Registry", () => {
 
   describe("describe", () => {
     it("returns structured metadata", () => {
-      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines" }));
+      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
       const desc = registry.describe() as {
         total_resource_types: number;
         total_toolsets: number;
-        toolsets: Record<string, unknown>;
+        toolsets: Record<string, { displayName?: string }>;
       };
       expect(desc.total_toolsets).toBe(1);
       expect(desc.total_resource_types).toBeGreaterThan(0);
-      expect(desc.toolsets).toHaveProperty("pipelines");
+      expect(desc.toolsets).toHaveProperty("ccm");
+      expect(desc.toolsets.ccm.displayName).toBe("Cloud Cost Management");
     });
   });
 
   describe("getAllFilterFields", () => {
-    it("returns deduplicated FilterFieldSpec objects across enabled toolsets", () => {
-      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines,connectors" }));
+    it("returns deduplicated FilterFieldSpec objects across CCM resources", () => {
+      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
       const fields = registry.getAllFilterFields();
       expect(Array.isArray(fields)).toBe(true);
-      // Every entry should have name and description
       for (const f of fields) {
         expect(f).toHaveProperty("name");
         expect(f).toHaveProperty("description");
         expect(typeof f.name).toBe("string");
         expect(typeof f.description).toBe("string");
       }
-      // "search_term" appears in both pipelines and connectors — should only appear once
       const searchTermEntries = fields.filter((f) => f.name === "search_term");
       expect(searchTermEntries).toHaveLength(1);
     });
 
     it("includes enum metadata when defined", () => {
-      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "connectors" }));
+      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
       const fields = registry.getAllFilterFields();
-      const typeField = fields.find((f) => f.name === "type");
-      expect(typeField).toBeDefined();
-      expect(typeField!.enum).toBeDefined();
-      expect(typeField!.enum!.length).toBeGreaterThan(0);
+      const groupByField = fields.find((f) => f.name === "group_by");
+      expect(groupByField).toBeDefined();
+      expect(groupByField!.enum).toBeDefined();
+      expect(groupByField!.enum!.length).toBeGreaterThan(0);
     });
 
-    it("returns empty array when no toolsets have filter fields", () => {
-      // All toolsets have some filters, but verify the method doesn't crash with a narrow set
-      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines" }));
+    it("returns non-empty filter fields for CCM", () => {
+      const registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
       const fields = registry.getAllFilterFields();
       expect(fields.length).toBeGreaterThan(0);
     });
@@ -173,53 +169,9 @@ describe("Registry", () => {
       registry = new Registry(makeConfig());
     });
 
-    it("harness_describe exposes listFilterFields for each resource type", () => {
-      // Simulate what an LLM would get from harness_describe(resource_type="pipeline")
-      const def = registry.getResource("pipeline");
+    it("harness_ccm_finops_describe exposes listFilterFields for CCM resources", () => {
+      const def = registry.getResource("cost_perspective");
       expect(def.listFilterFields).toBeDefined();
-      const names = def.listFilterFields!.map((f) => f.name);
-      expect(names).toContain("search_term");
-      expect(names).toContain("module");
-    });
-
-    it("listFilterFields are accepted by dispatch when passed as flat input", async () => {
-      // Simulate: LLM discovers filter fields via describe, then passes them via filters catch-all
-      const def = registry.getResource("connector");
-      const names = def.listFilterFields!.map((f) => f.name);
-      expect(names).toContain("search_term");
-      expect(names).toContain("type");
-      expect(names).toContain("category");
-
-      const mockRequest = vi.fn().mockResolvedValue({
-        data: { content: [], totalElements: 0 },
-      });
-      const client = makeClient(mockRequest);
-
-      // Pass discovered filter fields as flat input (as they arrive after spreading filters catch-all)
-      await registry.dispatch(client, "connector", "list", {
-        search_term: "docker",
-        type: "DockerRegistry",
-        category: "CONNECTOR",
-        page: 0,
-        size: 10,
-      });
-
-      const call = mockRequest.mock.calls[0][0];
-      expect(call.params).toMatchObject({
-        searchTerm: "docker",
-        type: "DockerRegistry",
-        category: "CONNECTOR",
-      });
-    });
-
-    it("identifierFields include parent IDs for nested resources", () => {
-      // Trigger needs both pipeline_id and trigger_id
-      const triggerDef = registry.getResource("trigger");
-      expect(triggerDef.identifierFields).toContain("trigger_id");
-      expect(triggerDef.identifierFields).toContain("pipeline_id");
-      // pipeline_id is passed via queryParams on get, discoverable via describe
-      const getSpec = triggerDef.operations.get;
-      expect(getSpec?.queryParams).toHaveProperty("pipeline_id");
     });
 
     it("most listable resource types expose listFilterFields", () => {
@@ -233,66 +185,85 @@ describe("Registry", () => {
           if (def.listFilterFields) withFilters++;
         }
       }
-      // Majority of listable resources should have filter fields defined
       expect(withFilters / listable).toBeGreaterThanOrEqual(0.5);
     });
 
     it("describeSummary includes filter discovery hint", () => {
       const summary = registry.describeSummary() as { hint: string };
-      expect(summary.hint).toContain("harness_describe");
+      expect(summary.hint).toContain("harness_ccm_finops_describe");
     });
   });
 
   describe("dispatch", () => {
     let registry: Registry;
     beforeEach(() => {
-      registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines" }));
+      registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm" }));
     });
 
-    it("builds correct path and params for a list operation", async () => {
+    it("builds correct path and body for a list operation (cost_perspective)", async () => {
       const mockRequest = vi.fn().mockResolvedValue({
-        data: { content: [{ identifier: "p1" }], totalElements: 1 },
+        data: {
+          perspectives: {
+            views: [{ id: "p1", name: "Default" }],
+            totalCount: 1,
+          },
+        },
       });
       const client = makeClient(mockRequest);
 
-      await registry.dispatch(client, "pipeline", "list", {
-        search_term: "deploy",
+      await registry.dispatch(client, "cost_perspective", "list", {
+        search_term: "prod",
         page: 0,
         size: 10,
       });
 
       expect(mockRequest).toHaveBeenCalledOnce();
-      const call = mockRequest.mock.calls[0][0];
+      const call = mockRequest.mock.calls[0][0] as {
+        method: string;
+        path: string;
+        params: Record<string, unknown>;
+        body: { operationName?: string; variables?: Record<string, unknown> };
+      };
       expect(call.method).toBe("POST");
-      expect(call.path).toBe("/pipeline/api/pipelines/list");
+      expect(call.path).toBe("/ccm/api/graphql");
       expect(call.params).toMatchObject({
-        orgIdentifier: "default",
-        projectIdentifier: "test-project",
-        searchTerm: "deploy",
-        page: 0,
-        size: 10,
+        routingId: "test-account",
+      });
+      expect(call.body.operationName).toBe("FetchAllPerspectives");
+      expect(call.body.variables).toMatchObject({
+        pageNo: 0,
+        pageSize: 10,
+        searchKey: "prod",
       });
     });
 
-    it("builds correct path with path params for a get operation", async () => {
-      const mockRequest = vi.fn().mockResolvedValue({ data: { identifier: "my-pipeline" } });
+    it("builds correct path and query params for a get operation", async () => {
+      const mockRequest = vi.fn().mockResolvedValue({ data: { id: "my-view", name: "Test" } });
       const client = makeClient(mockRequest);
 
-      await registry.dispatch(client, "pipeline", "get", {
-        pipeline_id: "my-pipeline",
+      await registry.dispatch(client, "cost_perspective", "get", {
+        perspective_id: "my-view",
       });
 
       expect(mockRequest).toHaveBeenCalledOnce();
-      const call = mockRequest.mock.calls[0][0];
+      const call = mockRequest.mock.calls[0][0] as {
+        method: string;
+        path: string;
+        params: Record<string, unknown>;
+      };
       expect(call.method).toBe("GET");
-      expect(call.path).toBe("/pipeline/api/pipelines/my-pipeline");
+      expect(call.path).toBe("/ccm/api/perspective");
+      expect(call.params).toMatchObject({
+        routingId: "test-account",
+        perspectiveId: "my-view",
+      });
     });
 
     it("throws on unsupported operation", async () => {
       const client = makeClient();
       await expect(
-        registry.dispatch(client, "pipeline", "nonexistent" as any, {}),
-      ).rejects.toThrow(/does not support "nonexistent"/);
+        registry.dispatch(client, "cost_perspective", "nonexistent" as never, {}),
+      ).rejects.toThrow(/does not support/);
     });
 
     it("throws on unknown resource type", async () => {
@@ -302,179 +273,34 @@ describe("Registry", () => {
       ).rejects.toThrow(/Unknown resource_type "nonexistent"/);
     });
 
-    it("throws when required path param is missing", async () => {
+    it("throws when required path param is missing for list", async () => {
       const client = makeClient();
       await expect(
-        registry.dispatch(client, "pipeline", "get", {}),
+        registry.dispatch(client, "cost_anomaly_summary", "list", {}),
       ).rejects.toThrow(/Missing required field/);
-    });
-
-    it("pipeline update with yamlPipeline sends raw YAML string as body with Content-Type header and returns openInHarness", async () => {
-      const yaml = "pipeline:\n  name: Test\n  identifier: test_pipeline\n  stages: []";
-      const mockRequest = vi.fn().mockResolvedValue({
-        data: { identifier: "test_pipeline", yamlPipeline: yaml },
-      });
-      const client = makeClient(mockRequest);
-
-      const result = (await registry.dispatch(client, "pipeline", "update", {
-        pipeline_id: "test_pipeline",
-        project_id: "my-project",
-        org_id: "default",
-        body: { yamlPipeline: yaml },
-      })) as Record<string, unknown>;
-
-      expect(mockRequest).toHaveBeenCalledOnce();
-      const call = mockRequest.mock.calls[0][0];
-      expect(call.method).toBe("PUT");
-      expect(call.path).toBe("/pipeline/api/pipelines/v2/test_pipeline");
-      // Body is the raw YAML string, not a JSON wrapper
-      expect(call.body).toBe(yaml);
-      // Content-Type header is set to application/yaml via spec headers
-      expect(call.headers).toEqual({ "Content-Type": "application/yaml" });
-      expect(result.openInHarness).toBeDefined();
-      expect(String(result.openInHarness)).toContain("/pipelines/test_pipeline/pipeline-studio");
-    });
-
-    it("pipeline update with body.pipeline passes body through", async () => {
-      const body = { pipeline: { name: "X", identifier: "x", stages: [] } };
-      const mockRequest = vi.fn().mockResolvedValue({ data: body.pipeline });
-      const client = makeClient(mockRequest);
-
-      await registry.dispatch(client, "pipeline", "update", {
-        pipeline_id: "x",
-        project_id: "p",
-        org_id: "default",
-        body,
-      });
-
-      const call = mockRequest.mock.calls[0][0];
-      expect(call.body).toEqual(body);
-    });
-
-    it("pipeline update without pipeline or yamlPipeline throws", async () => {
-      const client = makeClient();
-      await expect(
-        registry.dispatch(client, "pipeline", "update", {
-          pipeline_id: "x",
-          body: {},
-        }),
-      ).rejects.toThrow(/body must include either pipeline/);
     });
   });
 
   describe("read-only mode", () => {
     let registry: Registry;
     beforeEach(() => {
-      registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "pipelines", HARNESS_READ_ONLY: true }));
+      registry = new Registry(makeConfig({ HARNESS_TOOLSETS: "ccm", HARNESS_READ_ONLY: true }));
     });
 
     it("allows list operations", async () => {
-      const mockRequest = vi.fn().mockResolvedValue({ data: { content: [], totalElements: 0 } });
+      const mockRequest = vi.fn().mockResolvedValue({
+        data: { perspectives: { views: [], totalCount: 0 } },
+      });
       const client = makeClient(mockRequest);
-      await registry.dispatch(client, "pipeline", "list", {});
+      await registry.dispatch(client, "cost_perspective", "list", {});
       expect(mockRequest).toHaveBeenCalledOnce();
     });
 
     it("allows get operations", async () => {
-      const mockRequest = vi.fn().mockResolvedValue({ data: { identifier: "p1" } });
+      const mockRequest = vi.fn().mockResolvedValue({ data: { id: "v1", name: "View" } });
       const client = makeClient(mockRequest);
-      await registry.dispatch(client, "pipeline", "get", { pipeline_id: "p1" });
+      await registry.dispatch(client, "cost_perspective", "get", { perspective_id: "v1" });
       expect(mockRequest).toHaveBeenCalledOnce();
-    });
-
-    it("blocks create operations", async () => {
-      const client = makeClient();
-      await expect(
-        registry.dispatch(client, "pipeline", "create", { body: {} }),
-      ).rejects.toThrow(/Read-only mode/);
-    });
-
-    it("blocks update operations", async () => {
-      const client = makeClient();
-      await expect(
-        registry.dispatch(client, "pipeline", "update", { pipeline_id: "p1", body: {} }),
-      ).rejects.toThrow(/Read-only mode/);
-    });
-
-    it("blocks delete operations", async () => {
-      const client = makeClient();
-      await expect(
-        registry.dispatch(client, "pipeline", "delete", { pipeline_id: "p1" }),
-      ).rejects.toThrow(/Read-only mode/);
-    });
-
-    it("blocks execute actions", async () => {
-      const client = makeClient();
-      await expect(
-        registry.dispatchExecute(client, "pipeline", "run", { pipeline_id: "p1" }),
-      ).rejects.toThrow(/Read-only mode/);
-    });
-  });
-
-  describe("bodySchema enforcement", () => {
-    let registry: Registry;
-    beforeEach(() => {
-      registry = new Registry(makeConfig());
-    });
-
-    it("every create operation has a bodySchema", () => {
-      const missing: string[] = [];
-      for (const type of registry.getAllResourceTypes()) {
-        const def = registry.getResource(type);
-        if (def.operations.create && !def.operations.create.bodySchema) {
-          missing.push(`${type}.create`);
-        }
-      }
-      expect(missing, `Missing bodySchema on create: ${missing.join(", ")}`).toEqual([]);
-    });
-
-    it("every update operation has a bodySchema", () => {
-      const missing: string[] = [];
-      for (const type of registry.getAllResourceTypes()) {
-        const def = registry.getResource(type);
-        if (def.operations.update && !def.operations.update.bodySchema) {
-          missing.push(`${type}.update`);
-        }
-      }
-      expect(missing, `Missing bodySchema on update: ${missing.join(", ")}`).toEqual([]);
-    });
-
-    it("every executeAction has a bodySchema", () => {
-      const missing: string[] = [];
-      for (const type of registry.getAllResourceTypes()) {
-        const def = registry.getResource(type);
-        if (def.executeActions) {
-          for (const [action, spec] of Object.entries(def.executeActions)) {
-            if (!spec.bodySchema) {
-              missing.push(`${type}.${action}`);
-            }
-          }
-        }
-      }
-      expect(missing, `Missing bodySchema on executeActions: ${missing.join(", ")}`).toEqual([]);
-    });
-
-    it("bodySchema fields have required properties", () => {
-      const invalid: string[] = [];
-      for (const type of registry.getAllResourceTypes()) {
-        const def = registry.getResource(type);
-        const specs = [
-          ...Object.entries(def.operations).map(([op, s]) => [`${type}.${op}`, s] as const),
-          ...Object.entries(def.executeActions ?? {}).map(([a, s]) => [`${type}.${a}`, s] as const),
-        ];
-        for (const [label, spec] of specs) {
-          if (spec.bodySchema) {
-            if (!spec.bodySchema.description) invalid.push(`${label}: missing description`);
-            if (!Array.isArray(spec.bodySchema.fields)) invalid.push(`${label}: fields not array`);
-            for (const field of spec.bodySchema.fields) {
-              if (!field.name || !field.type || typeof field.required !== "boolean" || !field.description) {
-                invalid.push(`${label}.${field.name ?? "?"}: incomplete field spec`);
-              }
-            }
-          }
-        }
-      }
-      expect(invalid, `Invalid bodySchema fields: ${invalid.join("; ")}`).toEqual([]);
     });
   });
 });

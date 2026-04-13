@@ -18,8 +18,8 @@ export function registerOptimizeCostsPrompt(server: McpServer): void {
           text: `Analyze cloud costs and recommend optimizations for this Harness project.
 
 Steps:
-1. Call harness_list with resource_type="cost_recommendation"${projectId ? ` and project_id="${projectId}"` : ""} to get current cost recommendations
-2. Call harness_list with resource_type="cost_anomaly"${projectId ? ` and project_id="${projectId}"` : ""} to identify any cost anomalies
+1. Call harness_ccm_finops_list with resource_type="cost_recommendation"${projectId ? ` and project_id="${projectId}"` : ""} to get current cost recommendations
+2. Call harness_ccm_finops_list with resource_type="cost_anomaly"${projectId ? ` and project_id="${projectId}"` : ""} to identify any cost anomalies
 3. Prioritize findings by potential savings (highest first)
 4. For each recommendation, provide:
    - **What**: Which resource/service is over-provisioned or idle

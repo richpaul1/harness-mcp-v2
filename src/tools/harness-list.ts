@@ -12,11 +12,11 @@ export function registerListTool(server: McpServer, registry: Registry, client: 
   // Build a dynamic description for the filters param from all enabled resource definitions
   const allFilterNames = registry.getAllFilterFields().map((f) => f.name);
   const filtersDesc = allFilterNames.length > 0
-    ? `Resource-specific filters as key-value pairs. Available keys across enabled resource types: ${allFilterNames.join(", ")}. Call harness_describe for filters available on a specific resource_type.`
-    : "Resource-specific filters as key-value pairs. Call harness_describe for available filters per resource_type.";
+    ? `Resource-specific filters as key-value pairs. Available keys across enabled resource types: ${allFilterNames.join(", ")}. Call harness_ccm_finops_describe for filters available on a specific resource_type.`
+    : "Resource-specific filters as key-value pairs. Call harness_ccm_finops_describe for available filters per resource_type.";
 
   server.registerTool(
-    "harness_list",
+    "harness_ccm_finops_list",
     {
       description: "List Harness resources with filtering and pagination. Accepts a Harness URL to auto-extract scope.",
       inputSchema: {

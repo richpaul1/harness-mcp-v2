@@ -1,8 +1,8 @@
 /**
- * Structural validation of all toolset definitions.
+ * Structural validation of all toolset definitions (CCM / FinOps registry).
  *
- * Validates path/param consistency, bodySchema presence on write ops,
- * and general correctness across all 60+ resource types.
+ * Validates path/param consistency, identifier wiring, HTTP conventions,
+ * and cross-references across all enabled resource types.
  */
 import { describe, it, expect } from "vitest";
 import { Registry } from "../../src/registry/index.js";
@@ -26,6 +26,23 @@ function makeConfig(): Config {
 function extractPathPlaceholders(path: string): string[] {
   const matches = path.match(/\{([^}]+)\}/g);
   return matches ? matches.map((m) => m.slice(1, -1)) : [];
+}
+
+/** Path placeholders and pathParam targets that are not resource IDs (injected scope / account). */
+function isScopeOrAccountPlaceholder(name: string): boolean {
+  return name === "accountId" || name === "org" || name === "project";
+}
+
+/**
+ * True when `get` substitutes a non-scope segment in the URL path or via pathParams
+ * (i.e. needs a corresponding identifier field). GraphQL/body-only GETs and account-only
+ * Lightwing paths may legitimately use empty identifierFields.
+ */
+function getBindsNonScopePathSegments(spec: EndpointSpec): boolean {
+  const fromPath = extractPathPlaceholders(spec.path).filter((p) => !isScopeOrAccountPlaceholder(p));
+  if (fromPath.length > 0) return true;
+  if (!spec.pathParams) return false;
+  return Object.values(spec.pathParams).some((ph) => !isScopeOrAccountPlaceholder(ph));
 }
 
 describe("Toolset structural validation", () => {
@@ -131,17 +148,18 @@ describe("Toolset structural validation", () => {
       expect(missing, `Missing identifierFields array: ${missing.join(", ")}`).toEqual([]);
     });
 
-    it("most resource types with a get operation have at least one identifierField", () => {
+    it("get operations that bind non-scope path segments have identifierFields", () => {
       const issues: string[] = [];
       for (const type of allTypes) {
         const def = registry.getResource(type);
-        // Only check resources that have a get operation — they need an ID to fetch
-        if (def.operations.get && def.identifierFields.length === 0) {
+        const getSpec = def.operations.get;
+        if (!getSpec) continue;
+        if (!getBindsNonScopePathSegments(getSpec)) continue;
+        if (!def.identifierFields || def.identifierFields.length === 0) {
           issues.push(type);
         }
       }
-      // Allow some dashboard/analytics types that use body-based get
-      expect(issues.length).toBeLessThan(allTypes.length * 0.3);
+      expect(issues, `Missing identifierFields for get with entity path segments:\n${issues.join("\n")}`).toEqual([]);
     });
 
     it("identifierFields referenced in get pathParams exist", () => {

@@ -5,62 +5,13 @@ import type { ResourceDefinition, ToolsetDefinition, ToolsetName, OperationName,
 import { createLogger } from "../utils/logger.js";
 import { buildDeepLink, appendStoreType } from "../utils/deep-links.js";
 
-// Import all toolsets
-import { pipelinesToolset } from "./toolsets/pipelines.js";
-import { servicesToolset } from "./toolsets/services.js";
-import { environmentsToolset } from "./toolsets/environments.js";
-import { connectorsToolset } from "./toolsets/connectors.js";
-import { infrastructureToolset } from "./toolsets/infrastructure.js";
-import { secretsToolset } from "./toolsets/secrets.js";
-import { logsToolset } from "./toolsets/logs.js";
-import { auditToolset } from "./toolsets/audit.js";
-import { delegatesToolset } from "./toolsets/delegates.js";
-import { repositoriesToolset } from "./toolsets/repositories.js";
-import { registriesToolset } from "./toolsets/registries.js";
-import { templatesToolset } from "./toolsets/templates.js";
-import { dashboardsToolset } from "./toolsets/dashboards.js";
-import { idpToolset } from "./toolsets/idp.js";
-import { pullRequestsToolset } from "./toolsets/pull-requests.js";
-import { featureFlagsToolset } from "./toolsets/feature-flags.js";
-import { gitopsToolset } from "./toolsets/gitops.js";
-import { chaosToolset } from "./toolsets/chaos.js";
 import { ccmToolset } from "./toolsets/ccm.js";
-import { seiToolset } from "./toolsets/sei.js";
-import { scsToolset } from "./toolsets/scs.js";
-import { stoToolset } from "./toolsets/sto.js";
-import { accessControlToolset } from "./toolsets/access-control.js";
-import { settingsToolset } from "./toolsets/settings.js";
-import { platformToolset } from "./toolsets/platform.js";
 
 const log = createLogger("registry");
 
 /** All available toolsets */
 const ALL_TOOLSETS: ToolsetDefinition[] = [
-  pipelinesToolset,
-  servicesToolset,
-  environmentsToolset,
-  connectorsToolset,
-  infrastructureToolset,
-  secretsToolset,
-  logsToolset,
-  auditToolset,
-  delegatesToolset,
-  repositoriesToolset,
-  registriesToolset,
-  templatesToolset,
-  dashboardsToolset,
-  idpToolset,
-  pullRequestsToolset,
-  featureFlagsToolset,
-  gitopsToolset,
-  chaosToolset,
   ccmToolset,
-  seiToolset,
-  scsToolset,
-  stoToolset,
-  accessControlToolset,
-  settingsToolset,
-  platformToolset,
 ];
 
 /**
@@ -248,7 +199,7 @@ export class Registry {
       params.projectIdentifier = (input.project_id as string) ?? this.config.HARNESS_DEFAULT_PROJECT_ID;
     }
 
-    // CCM cost_category list: map harness_list page/size + defaults (matches CE UI query shape)
+    // CCM cost_category list: map harness_ccm_finops_list page/size + defaults (matches CE UI query shape)
     if (
       def.resourceType === "cost_category" &&
       spec.method === "GET" &&
@@ -366,7 +317,7 @@ export class Registry {
       if (missing.length > 0) {
         throw new Error(
           `Missing required fields for ${def.resourceType}: ${missing.join(", ")}. ` +
-          `Use harness_describe(resource_type="${def.resourceType}") to see the schema.`
+          `Use harness_ccm_finops_describe(resource_type="${def.resourceType}") to see the schema.`
         );
       }
     }
@@ -578,7 +529,7 @@ export class Registry {
       total_resource_types: this.resourceMap.size,
       total_toolsets: this.toolsets.length,
       resource_types,
-      hint: "Call harness_describe(resource_type='<type>') for full details including diagnosticHint and executeHint.",
+      hint: "Call harness_ccm_finops_describe(resource_type='<type>') for full details including diagnosticHint and executeHint.",
     };
   }
 }
