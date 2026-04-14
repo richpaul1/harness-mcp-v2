@@ -70,16 +70,52 @@ To drill into a **specific cost category bucket** (e.g. a Business Unit) broken 
 - Works on **`cost_breakdown`**, **`cost_timeseries`**, and **`cost_summary`**.
 - The `group_by` can be any dimension — the filter scopes server-side, then groups by whatever you choose.
 
+**AWS example — BU → account drill-down:**
+
+```json
+{
+  "resource_type": "cost_breakdown",
+  "perspective_id": "<id>",
+  "business_mapping_name": "Business Units",
+  "filter_cost_category_value": "infosec",
+  "group_by": "awsUsageaccountid",
+  "filter_aws_line_item_type": "Usage"
+}
+```
+
+**Important for AWS:** Always add `filter_aws_line_item_type: "Usage"` when doing BU + service/account breakdowns on AWS. Without it, RI/SP commitment fees appear as "No Service" entries with extreme trends that distort the analysis. See section 4.
+
 ---
 
-## 4. Usage-only (persist for the thread)
+## 4. AWS service-level analysis and "No Service"
+
+### The "No Service" problem
+
+AWS billing includes line items with **no `awsServicecode`** — Reserved Instance fees, Savings Plan commitments, credits, and tax. These appear as **"No Service"** in service-level breakdowns with extreme trends (+1,000%, +142,000%) that make analysis meaningless. They are billing artifacts, not real service spend.
+
+### Rule: always filter for AWS service breakdowns
+
+Whenever you do an AWS service-level breakdown (`group_by: awsServicecode`) — **regardless** of whether the user asked for "Usage only" — add:
+
+```json
+"filter_aws_line_item_type": "Usage"
+```
+
+This applies to **`cost_breakdown`**, **`cost_timeseries`**, and **`cost_summary`** whenever the analysis involves AWS service-level dimensions.
+
+**Also add this filter when:**
+- Grouping by `awsUsageaccountid` and the user wants clean account attribution
+- Using `filter_cost_category_value` on an AWS perspective with service-level `group_by`
+- Investigating AWS cost spikes (see section 6)
+
+### Usage-only mode (persist for the thread)
 
 If the user asks for **Usage only** (run-rate / usage-based cost):
 
 1. **Keep that constraint** for every follow-up. Do **not** silently switch to full bill without saying scope changed.
-2. **Label numbers:** `cost_trend` / `cost_timeseries` / domain rollups are often **full CCM cost** (RIFee, Savings Plan, Tax, …). When the ask is Usage-only, say so when quoting those totals.
+2. **Label numbers:** `cost_trend` / `cost_timeseries` / domain rollups are often **full CCM cost** (RIFee, Savings Plan, Tax, ...). When the ask is Usage-only, say so when quoting those totals.
 3. **Spikes:** RIFee-driven moves are **not** usage spikes; report fees separately or out-of-scope for usage.
-4. **AWS Usage-only — required filter:** add **`"filter_aws_line_item_type": "Usage"`** for **`cost_breakdown`**, **`cost_timeseries`**, **`cost_drilldown`**.
+4. **AWS Usage-only — required filter:** add **`"filter_aws_line_item_type": "Usage"`** for all AWS queries.
 
 ---
 
@@ -91,37 +127,51 @@ If the user asks for **Usage only** (run-rate / usage-based cost):
 2. **Chart kind:** Use **`kind_hint: "line"`** for daily/time series. Use **`kind_hint: "bar"`** or **`grouped_bar`** for comparisons and breakdowns.
 3. **Chart sizes:** `chart_size: "medium"` (960×540, default) or `chart_size: "large"` (1920×1080, 2× all dimensions). Use `"large"` for reports and triage documents.
 4. **Inline first:** The tool returns `image/png` — present it so the user sees the chart directly in the chat. This is the primary output.
-5. **Save to disk:** Use `output_path: "triage/assets/<filename>.png"` when creating markdown reports — saves AND returns inline in the same call. Do not write PNGs to disk unless creating a report or the user explicitly asks.
+5. **Save to disk — ABSOLUTE PATHS ONLY:** The MCP server runs in its own working directory, not your workspace. **Relative paths will be rejected.** Always use the full absolute path to your workspace:
+   - **Correct:** `output_path: "/Users/me/work/my-project/triage/assets/chart.png"`
+   - **Wrong:** `output_path: "triage/assets/chart.png"` (resolves to the MCP server directory, not your workspace)
+   - Only write PNGs to disk when creating a report or the user explicitly asks.
 6. **No chart-less responses:** If you have cost data, you have a chart. Period.
 7. **X-axis labels:** All labels are shown for datasets with 20 or fewer items — never skipped. If labels are too wide for horizontal placement, they render at a diagonal angle. For datasets with 20+ items, diagonal labels are used with minimal thinning only if overlap is unavoidable.
+8. **PDF reports — same rule:** `markdown_to_pdf` input_path and output_path must also be absolute paths.
 
 ---
 
 ## 6. Cost spike investigation — repeatable pattern
 
-Use this **same sequence** whenever the user asks what drove a **spike**, **day-over-day jump**, or **period vs period** increase. Adapt dimensions to the cloud (below defaults to **GCP**; substitute AWS fields from `harness_ccm_finops_describe`).
+Use this **same sequence** whenever the user asks what drove a **spike**, **day-over-day jump**, or **period vs period** increase. Adapt dimensions to the cloud — use the **cross-reference table** below.
 
 ### A. Lock the question
 
 1. **Metric:** Full CCM cost vs **Usage-only** — if Usage-only, keep **§4** for the whole investigation.
 2. **Comparison:** two windows of equal length, **UTC**, via **`start_time_ms` / `end_time_ms`**.
 3. **Perspective:** Resolve **`perspective_id`** per **§1–2**; never omit it.
+4. **AWS:** Always add **`filter_aws_line_item_type: "Usage"`** for service/account breakdowns (see §4).
 
 ### B. See the shape (when it started)
 
-1. **`cost_timeseries`** with **`time_resolution: DAY`** at a **coarse** `group_by` (e.g. **`gcp_product`**, **`product`**, **`cloudProvider`**).
+1. **`cost_timeseries`** with **`time_resolution: DAY`** at a **coarse** `group_by`:
+   - **GCP:** `gcp_product` or `product`
+   - **AWS:** `awsServicecode` (with `filter_aws_line_item_type: "Usage"`)
+   - **Cross-cloud:** `cloudProvider` or `product`
 2. Optionally scope with filters (account, project, product, `filter_cost_category_value`).
 
 ### C. Isolate *where* (ownership)
 
-1. **`cost_breakdown`** with a **placement** group-by, e.g. GCP **`gcp_project_id`**, AWS account / service — **same UTC windows**.
+1. **`cost_breakdown`** with a **placement** group-by — **same UTC windows**:
+   - **GCP:** `group_by: gcp_project_id`
+   - **AWS:** `group_by: awsUsageaccountid` + `filter_aws_line_item_type: "Usage"`
 2. Rank entities by **delta** or by **cost** on the spike window. Use **`limit` / `offset`** for pagination.
-3. If scoping to a **single project/account**, add **`filter_gcp_project_id`** (or AWS equivalent).
+3. If scoping to a **single project/account**:
+   - **GCP:** add `filter_gcp_project_id: "<project_id>"`
+   - **AWS:** add `filter_aws_usage_account_id: "<account_name_or_id>"`
 4. If scoping to a **cost category bucket**, add **`filter_cost_category_value`** + **`business_mapping_name`**.
 
 ### D. Explain *what* moved the dollars
 
-1. **`cost_breakdown`** with **`group_by`** on finest billing grain — for GCP: **`gcp_sku_description`** (or **`gcp_product`** for summary).
+1. **`cost_breakdown`** with **`group_by`** on finest billing grain:
+   - **GCP:** `gcp_sku_description` (or `gcp_product` for summary)
+   - **AWS:** `awsServicecode` → then drill to `awsUsageType` for detail
 2. Compare same two windows; report **largest positive deltas** first, then offsets.
 
 ### E. Show *how it evolved*
@@ -131,7 +181,19 @@ Use this **same sequence** whenever the user asks what drove a **spike**, **day-
 
 ### F. Optional: named resources
 
-1. **`group_by: gcpResourceGlobalName`** with same filters. Use for attribution/naming, not reconciliation.
+1. **GCP:** `group_by: gcpResourceGlobalName` with same filters.
+2. **AWS:** no equivalent — use `awsUsageType` or `awsInstancetype` for finer grain.
+
+### Cloud cross-reference
+
+| Purpose | GCP | AWS |
+|---------|-----|-----|
+| Owner / placement | `group_by: gcp_project_id` | `group_by: awsUsageaccountid` |
+| Scope to one owner | `filter_gcp_project_id` | `filter_aws_usage_account_id` |
+| Service / product | `group_by: gcp_product` | `group_by: awsServicecode` |
+| Scope to one service | `filter_gcp_product` | `filter_aws_service` |
+| Finest billing grain | `group_by: gcp_sku_description` | `group_by: awsUsageType` |
+| Exclude billing artifacts | N/A | `filter_aws_line_item_type: "Usage"` |
 
 ### G. Chart for the user
 
@@ -144,7 +206,7 @@ Use this **same sequence** whenever the user asks what drove a **spike**, **day-
 
 ### Creating markdown reports
 1. **Always include the original user prompt** at the top under `## Request`.
-2. Use `harness_ccm_finops_chart` with `output_path: "triage/assets/<filename>.png"` to save chart PNGs to disk in the same call.
+2. Use `harness_ccm_finops_chart` with `output_path` set to the **absolute path** in your workspace, e.g. `output_path: "/Users/me/work/my-project/triage/assets/<filename>.png"`. Never use relative paths — see §5.5.
 
 ---
 
@@ -515,9 +577,71 @@ With filters:
 - **`on_track`** — `forecastCost <= budgetAmount`: within budget, sorted by utilization %
 - **`summary`** — counts for each group + `skipped` (draft/zero-amount budgets)
 
-Each item includes: `name`, `perspective`, `period`, `budget_amount`, `actual_cost`, `forecast_cost`, `pct_actual`, `pct_forecast`, `time_left_days`, and either `overage` or `projected_overrun`.
+Each item includes: `name`, `perspective`, `perspective_id`, `period`, `budget_amount`, `actual_cost`, `forecast_cost`, `pct_actual`, `pct_forecast`, `time_left_days`, and either `overage` or `projected_overrun`.
+
+**Drilling into at-risk budgets:** Each item has `perspective_id` (the UUID) — use it directly for `cost_breakdown` / `cost_timeseries` queries. No need to resolve the ID separately.
 
 **Chart the results:** pass `over_budget` + `at_risk` arrays directly to `harness_ccm_finops_chart` as bar chart data — e.g. budget vs actual vs forecast grouped bars.
+
+**Caution — `search_term` on `cost_budget`:** Budget names with special characters (pipes `|`, quotes, etc.) may cause the server-side filter to return all budgets unfiltered. If a search returns unexpectedly many results, simplify the search term or filter client-side.
+
+---
+
+## 11. Perspective folders -- folder-scoped analysis
+
+When the user asks about **budget health for a folder**, a **team's perspectives**, or a **group of perspectives**, use this three-step pattern.
+
+### Step 1 -- Discover folders
+
+```json
+{
+  "resource_type": "cost_perspective_folder"
+}
+```
+
+Returns all folders with `id`, `name`, `viewType`, `description`, `pinned`. Find the target folder by name.
+
+### Step 2 -- List perspectives in the folder
+
+```json
+{
+  "resource_type": "cost_perspective",
+  "filters": {
+    "folder_id": "<folder_uuid>"
+  }
+}
+```
+
+Returns perspectives in that folder with `id`, `name`, `folderId`, `folderName`, `dataSources`, etc.
+
+### Step 3 -- Check budget health across all perspectives
+
+Collect all perspective names from step 2 (comma-separated) and pass to budget health:
+
+```json
+{
+  "tool": "harness_ccm_finops_budget_health",
+  "perspective_name": "Argus,Argus Prod,Argus Dev"
+}
+```
+
+Or use `harness_ccm_finops_list` with `cost_budget` for raw budget data:
+
+```json
+{
+  "resource_type": "cost_budget",
+  "filters": {
+    "perspective_name": "TeamX - GCP,TeamX Prod,TeamX Dev"
+  }
+}
+```
+
+### Key points
+
+- **Folder ID** is a UUID (e.g. `4shVddgdinS_Ob-0TGHQQC_w`), not a name -- always resolve via step 1.
+- **Budget filter** uses `perspective_name` (names, not IDs) -- comma-separated for multiple.
+- **Cost queries** still use `perspective_id` (the perspective UUID) -- don't mix these up.
+- Combine with section 10 (`harness_ccm_finops_budget_health`) for classified risk assessment across the entire folder.
 
 ---
 
@@ -542,6 +666,22 @@ Each item includes: `name`, `perspective`, `period`, `budget_amount`, `actual_co
 | Cost Category / BU | `cost_category` | All (requires `business_mapping_name`) |
 | Resource Tags | `resource_tag` | All (requires `tag_key`) |
 
+### Available scope filters
+
+These narrow results **before** grouping. Works on `cost_breakdown`, `cost_timeseries`, `cost_summary`.
+
+| Filter | Cloud | Purpose |
+|--------|-------|---------|
+| `filter_gcp_project_id` | GCP | Scope to GCP project(s) |
+| `filter_gcp_product` | GCP | Scope to GCP product(s) |
+| `filter_aws_usage_account_id` | AWS | Scope to AWS account(s) — parity with GCP project filter |
+| `filter_aws_service` | AWS | Scope to AWS service(s) (awsServicecode) |
+| `filter_aws_line_item_type` | AWS | Scope to line item type(s). **Use `"Usage"` for clean service breakdowns** |
+| `filter_product` | All | Scope to cross-cloud product(s) |
+| `filter_cost_category_value` | All | Scope to cost category bucket(s). Requires `business_mapping_name` |
+
+All filters accept comma-separated values or an `_ids`/`_s`/`_values` array variant.
+
 ---
 
 ## 13. Time filter presets
@@ -549,5 +689,70 @@ Each item includes: `name`, `perspective`, `period`, `budget_amount`, `actual_co
 `LAST_7`, `THIS_MONTH`, `LAST_30_DAYS`, `THIS_QUARTER`, `THIS_YEAR`, `LAST_MONTH`, `LAST_QUARTER`, `LAST_YEAR`, `LAST_3_MONTHS`, `LAST_6_MONTHS`, `LAST_12_MONTHS`
 
 Or use `start_time_ms` / `end_time_ms` (epoch ms, UTC) for custom windows.
+
+---
+
+## 14. Example prompts — getting started
+
+Use these verbatim or adapt them. They cover the most common FinOps workflows and are a good starting point for new users.
+
+### Before you start — personalise the placeholders
+
+These prompts use generic placeholders in `[square brackets]`. Before using them, ask the agent to discover your account's structure:
+
+> "List all our cost categories and business mapping names."
+
+The agent will return the exact mapping names (e.g. "Business Units", "Business Domains", "Teams") and their bucket names (e.g. "GPS", "GIS", "fraud solutions"). Substitute those into the placeholders below:
+
+| Placeholder | Replace with |
+|---|---|
+| `[your cost category mapping]` | The mapping name returned above, e.g. `Business Units` |
+| `[your cost category bucket]` | A specific bucket from that mapping, e.g. `Team A` |
+| `[your perspective]` | A perspective name, e.g. `GCP Default` or `Team B - GCP` |
+| `[date]` | A specific date, e.g. `April 8` |
+
+---
+
+### Orientation (run these first)
+
+> "What cloud providers do we have connected, and what's our overall spend this month?"
+
+> "List all our cost perspectives and cost category mappings."
+
+### Spend & cost analysis
+
+> "Show me a cost breakdown by GCP project for the last 30 days, with trends."
+
+> "Which [your cost category mapping] are spending the most this month, and how does that compare to last month?"
+
+> "Show me daily cost trends for [your cost category bucket] over the last 3 months."
+
+> "What are our top 10 GCP SKUs by spend this month?"
+
+### Budget health
+
+> "Which budgets are at risk of overspending this month?"
+
+> "Show me month-by-month actuals vs budget for the [your perspective] budget."
+
+### Anomalies
+
+> "Are there any active cost anomalies in the last 7 days? What's the dollar impact?"
+
+> "What caused the cost spike on [date] in GCP?"
+
+### Savings & recommendations
+
+> "What are our top open savings recommendations across all clouds?"
+
+> "Are there any open recommendations for [your cost category bucket]?"
+
+### Reports
+
+> "Which [your cost category mapping] budgets are at risk of overspending this month, and what is driving the variance?"
+
+> "Generate a monthly FinOps report across all [your cost category mapping] covering budget status, active anomalies, and top savings opportunities."
+
+> "Our [your perspective] budget is tracking over — walk me through what's driving the overrun and what we can do about it."
 
 ---

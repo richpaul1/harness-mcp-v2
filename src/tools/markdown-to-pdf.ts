@@ -24,7 +24,8 @@ export function registerMarkdownToPdfTool(server: McpServer): void {
         input_path: z
           .string()
           .describe(
-            "Absolute or workspace-relative path to a Markdown file to convert (e.g. 'docs/report.md'). " +
+            "ABSOLUTE path to a Markdown file to convert (e.g. '/Users/me/project/docs/report.md'). " +
+            "MUST be absolute — relative paths are rejected because the MCP server's cwd differs from your workspace. " +
             "Mutually exclusive with `markdown`.",
           )
           .optional(),
@@ -38,8 +39,9 @@ export function registerMarkdownToPdfTool(server: McpServer): void {
         output_path: z
           .string()
           .describe(
-            "Absolute or workspace-relative path for the output PDF (e.g. 'triage/report.pdf'). " +
-            "Defaults to the input_path with a .pdf extension, or 'output.pdf' when using raw markdown.",
+            "ABSOLUTE path for the output PDF (e.g. '/Users/me/project/triage/report.pdf'). " +
+            "MUST be absolute — relative paths are rejected because the MCP server's cwd differs from your workspace. " +
+            "Defaults to the input_path with a .pdf extension.",
           )
           .optional(),
         title: z
@@ -67,9 +69,14 @@ export function registerMarkdownToPdfTool(server: McpServer): void {
       }
 
       if (args.input_path) {
-        resolvedInputPath = path.isAbsolute(args.input_path)
-          ? args.input_path
-          : path.resolve(process.cwd(), args.input_path);
+        if (!path.isAbsolute(args.input_path)) {
+          return errorResult(
+            `input_path must be an absolute path (got '${args.input_path}'). ` +
+            "Relative paths resolve to the MCP server directory, not your workspace. " +
+            "Use the full path, e.g. '/Users/you/project/docs/report.md'.",
+          );
+        }
+        resolvedInputPath = args.input_path;
         if (!fs.existsSync(resolvedInputPath)) {
           return errorResult(`File not found: ${resolvedInputPath}`);
         }
@@ -87,13 +94,21 @@ export function registerMarkdownToPdfTool(server: McpServer): void {
       /* ---------- Resolve output path ---------- */
       let outPath: string;
       if (args.output_path) {
-        outPath = path.isAbsolute(args.output_path)
-          ? args.output_path
-          : path.resolve(process.cwd(), args.output_path);
+        if (!path.isAbsolute(args.output_path)) {
+          return errorResult(
+            `output_path must be an absolute path (got '${args.output_path}'). ` +
+            "Relative paths resolve to the MCP server directory, not your workspace. " +
+            "Use the full path, e.g. '/Users/you/project/triage/report.pdf'.",
+          );
+        }
+        outPath = args.output_path;
       } else if (resolvedInputPath) {
         outPath = resolvedInputPath.replace(/\.md$/i, ".pdf");
       } else {
-        outPath = path.resolve(process.cwd(), "output.pdf");
+        return errorResult(
+          "output_path is required when using raw markdown input. " +
+          "Provide an absolute path, e.g. '/Users/you/project/triage/report.pdf'.",
+        );
       }
 
       /* ---------- Convert ---------- */

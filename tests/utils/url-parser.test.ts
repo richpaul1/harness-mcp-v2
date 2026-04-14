@@ -2,201 +2,109 @@ import { describe, it, expect } from "vitest";
 import { parseHarnessUrl, applyUrlDefaults } from "../../src/utils/url-parser.js";
 
 describe("parseHarnessUrl", () => {
-  it("extracts account, org, project from a standard project URL", () => {
+  it("extracts account, org, project from a standard URL", () => {
     const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/orgs/default/projects/PM_Signoff/pipelines",
+      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/orgs/default/projects/PM_Signoff/perspectives",
     );
     expect(result.account_id).toBe("lnFZRF6jQO6tQnB9znMALw");
     expect(result.org_id).toBe("default");
     expect(result.project_id).toBe("PM_Signoff");
-    expect(result.resource_type).toBe("pipeline");
-    expect(result.resource_id).toBeUndefined(); // list page, no specific ID
+    expect(result.resource_type).toBe("cost_perspective");
+    expect(result.resource_id).toBeUndefined();
   });
 
-  it("extracts pipeline ID from pipeline-studio URL", () => {
+  it("extracts perspective ID from CCM perspective URL", () => {
     const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/orgs/default/projects/PM_Signoff/pipelines/Test_Approval/pipeline-studio/?storeType=INLINE&stageId=harness&sectionId=EXECUTION",
+      "https://app3.harness.io/ng/account/HgTKqISVTX-kQSVsWCHEcA/ce/perspectives/h3ais2fbQbyeD5g6qNY3xg/name/Domain%20-%20GIS",
     );
-    expect(result.org_id).toBe("default");
-    expect(result.project_id).toBe("PM_Signoff");
-    expect(result.resource_type).toBe("pipeline");
-    expect(result.resource_id).toBe("Test_Approval");
-    expect(result.pipeline_id).toBe("Test_Approval");
-  });
-
-  it("extracts pipeline ID from a second pipeline-studio URL", () => {
-    const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/orgs/default/projects/PM_Signoff/pipelines/Cursor_test_4/pipeline-studio/?storeType=INLINE",
-    );
-    expect(result.resource_type).toBe("pipeline");
-    expect(result.resource_id).toBe("Cursor_test_4");
-    expect(result.pipeline_id).toBe("Cursor_test_4");
-  });
-
-  it("extracts stepId from query params", () => {
-    const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/orgs/default/projects/PM_Signoff/pipelines/Test_Approval/pipeline-studio/?storeType=INLINE&stageId=harness&sectionId=EXECUTION&stepId=steps.0.step.approve",
-    );
-    expect(result.resource_type).toBe("pipeline");
-    expect(result.resource_id).toBe("Test_Approval");
+    expect(result.account_id).toBe("HgTKqISVTX-kQSVsWCHEcA");
+    expect(result.module).toBe("ce");
+    expect(result.resource_type).toBe("cost_perspective");
+    expect(result.resource_id).toBe("h3ais2fbQbyeD5g6qNY3xg");
   });
 
   it("extracts module from /all/{module}/orgs/... pattern", () => {
     const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/cd/orgs/default/projects/PM_Signoff/environments",
+      "https://app.harness.io/ng/account/abc123/all/ce/orgs/default/projects/test",
     );
-    expect(result.module).toBe("cd");
+    expect(result.module).toBe("ce");
     expect(result.org_id).toBe("default");
-    expect(result.project_id).toBe("PM_Signoff");
-    expect(result.resource_type).toBe("environment");
-    expect(result.resource_id).toBeUndefined(); // list page
   });
 
-  it("handles account-level settings connectors list", () => {
+  it("detects ce module directly in path", () => {
     const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/settings/connectors",
+      "https://app3.harness.io/ng/account/abc123/ce/perspectives",
     );
-    expect(result.account_id).toBe("lnFZRF6jQO6tQnB9znMALw");
-    expect(result.resource_type).toBe("connector");
-    expect(result.resource_id).toBeUndefined();
-    expect(result.org_id).toBeUndefined();
-    expect(result.project_id).toBeUndefined();
-  });
-
-  it("handles account-level settings connector by ID", () => {
-    const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/settings/connectors/test",
-    );
-    expect(result.resource_type).toBe("connector");
-    expect(result.resource_id).toBe("test");
-    expect(result.org_id).toBeUndefined();
-  });
-
-  it("handles project-level settings connector by ID", () => {
-    const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/lnFZRF6jQO6tQnB9znMALw/all/orgs/default/projects/GitX_Test/settings/connectors/harnessSecretManager",
-    );
-    expect(result.org_id).toBe("default");
-    expect(result.project_id).toBe("GitX_Test");
-    expect(result.resource_type).toBe("connector");
-    expect(result.resource_id).toBe("harnessSecretManager");
-  });
-
-  it("extracts execution ID and pipeline ID from execution URL", () => {
-    const result = parseHarnessUrl(
-      "https://ancestry.harness.io/ng/account/cetPGmqTQ22qdnkyMdP_9A/all/orgs/Genomics/projects/ga_ethnicity/pipelines/stack_ecs_docker_deploy/executions/GsHdrBCwR4ah3rwN9W_DMg/pipeline",
-    );
-    expect(result.account_id).toBe("cetPGmqTQ22qdnkyMdP_9A");
-    expect(result.org_id).toBe("Genomics");
-    expect(result.project_id).toBe("ga_ethnicity");
-    expect(result.resource_type).toBe("execution");
-    expect(result.resource_id).toBe("GsHdrBCwR4ah3rwN9W_DMg");
-    expect(result.execution_id).toBe("GsHdrBCwR4ah3rwN9W_DMg");
-    expect(result.pipeline_id).toBe("stack_ecs_docker_deploy");
-  });
-
-  it("handles /module/{module}/ pattern with deployments alias", () => {
-    const result = parseHarnessUrl(
-      "https://ancestry.harness.io/ng/account/cetPGmqTQ22qdnkyMdP_9A/module/ci/orgs/SOX/projects/sox_renewalslambdas/pipelines/stack_build/deployments/-JuPz3aUTriC4xig66BMEQ/pipeline?storeType=INLINE&step=mrwFoOjlQRC28GB3QpZ60g&stage=yx6EMK34TGyrcFsXeiJD0g",
-    );
-    expect(result.module).toBe("ci");
-    expect(result.org_id).toBe("SOX");
-    expect(result.project_id).toBe("sox_renewalslambdas");
-    expect(result.resource_type).toBe("execution");
-    expect(result.execution_id).toBe("-JuPz3aUTriC4xig66BMEQ");
-    expect(result.pipeline_id).toBe("stack_build");
+    expect(result.module).toBe("ce");
+    expect(result.resource_type).toBe("cost_perspective");
   });
 
   it("handles vanity domain URLs", () => {
     const result = parseHarnessUrl(
-      "https://ancestry.harness.io/ng/account/cetPGmqTQ22qdnkyMdP_9A/all/orgs/Genomics/projects/ga_ethnicity/services",
+      "https://company.harness.io/ng/account/cetPGmqTQ22qdnkyMdP_9A/all/orgs/Genomics/projects/ga_ethnicity",
     );
     expect(result.account_id).toBe("cetPGmqTQ22qdnkyMdP_9A");
     expect(result.org_id).toBe("Genomics");
-    expect(result.resource_type).toBe("service");
-  });
-
-  it("handles environment with specific ID", () => {
-    const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/abc123/all/orgs/myOrg/projects/myProject/environments/prod",
-    );
-    expect(result.resource_type).toBe("environment");
-    expect(result.resource_id).toBe("prod");
-    expect(result.environment_id).toBe("prod");
-  });
-
-  it("handles gitops agents URL", () => {
-    const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/abc123/all/orgs/default/projects/myProject/gitops/agents/myAgent/applications/myApp",
-    );
-    expect(result.resource_type).toBe("gitops_application");
-    expect(result.resource_id).toBe("myApp");
-    expect(result.agent_id).toBe("myAgent");
-  });
-
-  it("handles feature flags URL", () => {
-    const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/abc123/cf/orgs/default/projects/myProject/feature-flags/my_flag",
-    );
-    expect(result.resource_type).toBe("feature_flag");
-    expect(result.resource_id).toBe("my_flag");
+    expect(result.project_id).toBe("ga_ethnicity");
   });
 
   it("handles URL-encoded segments", () => {
     const result = parseHarnessUrl(
-      "https://app.harness.io/ng/account/abc123/all/orgs/default/projects/My%20Project/pipelines/My%20Pipeline/pipeline-studio",
+      "https://app.harness.io/ng/account/abc123/ce/perspectives/My%20Perspective",
     );
-    expect(result.project_id).toBe("My%20Project"); // projects segment is extracted raw
-    expect(result.pipeline_id).toBe("My Pipeline"); // resource IDs are decoded
-    expect(result.resource_type).toBe("pipeline");
+    expect(result.resource_id).toBe("My Perspective");
+    expect(result.resource_type).toBe("cost_perspective");
+  });
+
+  it("returns empty account when no account segment present", () => {
+    const result = parseHarnessUrl("https://app.harness.io/ng/");
+    expect(result.account_id).toBe("");
+    expect(result.resource_type).toBeUndefined();
   });
 });
 
 describe("applyUrlDefaults", () => {
   it("merges URL-derived values into args as defaults", () => {
-    const args = { include_yaml: true };
+    const args = { some_filter: true };
     const result = applyUrlDefaults(
       args as Record<string, unknown>,
-      "https://app.harness.io/ng/account/abc/all/orgs/myOrg/projects/myProject/pipelines/myPipeline/executions/exec123/pipeline",
+      "https://app3.harness.io/ng/account/abc/ce/perspectives/perspId123",
     );
-    expect(result.org_id).toBe("myOrg");
-    expect(result.project_id).toBe("myProject");
-    expect(result.resource_type).toBe("execution");
-    expect(result.execution_id).toBe("exec123");
-    expect(result.pipeline_id).toBe("myPipeline");
-    expect(result.include_yaml).toBe(true); // original arg preserved
+    expect(result.resource_type).toBe("cost_perspective");
+    expect(result.resource_id).toBe("perspId123");
+    expect(result.some_filter).toBe(true);
   });
 
   it("explicit args take precedence over URL-derived values", () => {
-    const args = { org_id: "explicitOrg", resource_type: "service" };
+    const args = { org_id: "explicitOrg", resource_type: "cost_budget" };
     const result = applyUrlDefaults(
       args as Record<string, unknown>,
-      "https://app.harness.io/ng/account/abc/all/orgs/urlOrg/projects/urlProject/pipelines",
+      "https://app.harness.io/ng/account/abc/all/orgs/urlOrg/projects/urlProject/perspectives",
     );
-    expect(result.org_id).toBe("explicitOrg"); // explicit wins
-    expect(result.resource_type).toBe("service"); // explicit wins
-    expect(result.project_id).toBe("urlProject"); // filled from URL
+    expect(result.org_id).toBe("explicitOrg");
+    expect(result.resource_type).toBe("cost_budget");
+    expect(result.project_id).toBe("urlProject");
   });
 
   it("returns args unchanged when url is undefined", () => {
-    const args = { resource_type: "pipeline" };
+    const args = { resource_type: "cost_perspective" };
     const result = applyUrlDefaults(args as Record<string, unknown>, undefined);
     expect(result).toEqual(args);
   });
 
   it("returns args unchanged for invalid URL", () => {
-    const args = { resource_type: "pipeline" };
+    const args = { resource_type: "cost_perspective" };
     const result = applyUrlDefaults(args as Record<string, unknown>, "not-a-url");
     expect(result).toEqual(args);
   });
 
   it("does not mutate the original args object", () => {
-    const args = { resource_type: "pipeline" };
+    const args = { resource_type: "cost_budget" };
     const result = applyUrlDefaults(
       args as Record<string, unknown>,
-      "https://app.harness.io/ng/account/abc/all/orgs/myOrg/projects/myProject/services",
+      "https://app.harness.io/ng/account/abc/all/orgs/myOrg/projects/myProject",
     );
-    expect(args).toEqual({ resource_type: "pipeline" }); // unchanged
+    expect(args).toEqual({ resource_type: "cost_budget" });
     expect(result.org_id).toBe("myOrg");
   });
 });

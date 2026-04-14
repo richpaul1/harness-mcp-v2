@@ -10,65 +10,20 @@ export interface ParsedHarnessUrl {
   module?: string;
   resource_type?: string;
   resource_id?: string;
-  pipeline_id?: string;
-  execution_id?: string;
-  agent_id?: string;
-  repo_id?: string;
-  registry_id?: string;
-  artifact_id?: string;
-  environment_id?: string;
 }
 
 /** Union of ParsedHarnessUrl fields that RESOURCE_SEGMENTS can write to. */
-type ContextField =
-  | "pipeline_id"
-  | "execution_id"
-  | "resource_id"
-  | "agent_id"
-  | "repo_id"
-  | "registry_id"
-  | "artifact_id"
-  | "environment_id";
+type ContextField = "resource_id";
 
 /** Known Harness module identifiers that appear in URL paths */
 const MODULES = new Set(["cd", "ci", "cf", "ce", "cv", "sto", "chaos", "idp", "sei"]);
 
 /**
- * Maps URL path segments (plural resource names) to registry resource types
- * and the field name used when the resource appears as parent context.
+ * Maps URL path segments (plural resource names) to registry resource types.
+ * Only CCM-relevant segments are included.
  */
 const RESOURCE_SEGMENTS: Record<string, { type: string; contextField: ContextField }> = {
-  "pipelines":        { type: "pipeline",            contextField: "pipeline_id" },
-  "executions":       { type: "execution",           contextField: "execution_id" },
-  "deployments":      { type: "execution",           contextField: "execution_id" },
-  "triggers":         { type: "trigger",             contextField: "resource_id" },
-  "input-sets":       { type: "input_set",           contextField: "resource_id" },
-  "services":         { type: "service",             contextField: "resource_id" },
-  "environments":     { type: "environment",         contextField: "environment_id" },
-  "connectors":       { type: "connector",           contextField: "resource_id" },
-  "templates":        { type: "template",            contextField: "resource_id" },
-  "secrets":          { type: "secret",              contextField: "resource_id" },
-  "delegates":        { type: "delegate",            contextField: "resource_id" },
-  "agents":           { type: "gitops_agent",        contextField: "agent_id" },
-  "applications":     { type: "gitops_application",  contextField: "resource_id" },
-  "clusters":         { type: "gitops_cluster",      contextField: "resource_id" },
-  "feature-flags":    { type: "feature_flag",        contextField: "resource_id" },
-  "experiments":      { type: "chaos_experiment",    contextField: "resource_id" },
-  "registries":       { type: "registry",            contextField: "registry_id" },
-  "artifacts":        { type: "artifact",            contextField: "artifact_id" },
-  "repositories":     { type: "repository",          contextField: "repo_id" },
-  "issues":           { type: "sto_issue",           contextField: "resource_id" },
-  "exemptions":       { type: "sto_exemption",       contextField: "resource_id" },
-  "scorecards":       { type: "idp_scorecard",       contextField: "resource_id" },
-  "catalog":          { type: "idp_catalog_entity",  contextField: "resource_id" },
-  "users":            { type: "user",                contextField: "resource_id" },
-  "user-groups":      { type: "user_group",          contextField: "resource_id" },
-  "service-accounts": { type: "service_account",     contextField: "resource_id" },
-  "roles":            { type: "role",                contextField: "resource_id" },
-  "resource-groups":  { type: "resource_group",      contextField: "resource_id" },
-  "audit-trail":      { type: "audit_log",           contextField: "resource_id" },
-  "dashboards":       { type: "dashboard",           contextField: "resource_id" },
-  "pullrequests":     { type: "pull_request",        contextField: "resource_id" },
+  "perspectives":     { type: "cost_perspective",   contextField: "resource_id" },
 };
 
 /** Structural segments that should never be treated as resource IDs */
@@ -80,12 +35,9 @@ const STRUCTURAL = new Set([
  * Parse a Harness UI URL and extract identifiers.
  *
  * Handles patterns like:
- * - .../orgs/{org}/projects/{project}/pipelines/{id}/pipeline-studio
- * - .../orgs/{org}/projects/{project}/pipelines/{id}/executions/{execId}/pipeline
- * - .../module/ci/orgs/{org}/projects/{project}/...
- * - .../all/cd/orgs/{org}/projects/{project}/...
- * - .../all/settings/connectors/{id}
- * - Vanity domains (e.g. ancestry.harness.io)
+ * - .../account/{accountId}/ce/perspectives/{perspectiveId}/...
+ * - .../orgs/{org}/projects/{project}/...
+ * - Vanity domains (e.g. app3.harness.io)
  */
 export function parseHarnessUrl(urlStr: string): ParsedHarnessUrl {
   const url = new URL(urlStr);
@@ -93,19 +45,16 @@ export function parseHarnessUrl(urlStr: string): ParsedHarnessUrl {
 
   const result: ParsedHarnessUrl = { account_id: "" };
 
-  // 1. Extract account_id
   const accountIdx = segments.indexOf("account");
   if (accountIdx >= 0 && accountIdx + 1 < segments.length) {
     result.account_id = segments[accountIdx + 1]!;
   }
 
-  // 2. Extract module from /module/{name}/ pattern
   const moduleIdx = segments.indexOf("module");
   if (moduleIdx >= 0 && moduleIdx + 1 < segments.length) {
     result.module = segments[moduleIdx + 1]!;
   }
 
-  // 3. Extract org and project
   const orgsIdx = segments.indexOf("orgs");
   if (orgsIdx >= 0 && orgsIdx + 1 < segments.length) {
     result.org_id = segments[orgsIdx + 1]!;
@@ -115,7 +64,6 @@ export function parseHarnessUrl(urlStr: string): ParsedHarnessUrl {
     result.project_id = segments[projectsIdx + 1]!;
   }
 
-  // 4. Check for module after /all/ (e.g. /all/cd/orgs/...)
   const allIdx = segments.indexOf("all");
   if (allIdx >= 0 && !result.module && allIdx + 1 < segments.length) {
     const afterAll = segments[allIdx + 1]!;
@@ -124,9 +72,12 @@ export function parseHarnessUrl(urlStr: string): ParsedHarnessUrl {
     }
   }
 
-  // 5. Walk segments to find resource types and IDs.
-  //    Each match records the resource type and optional ID.
-  //    The last (deepest) match becomes the primary resource.
+  // Also detect "ce" module directly in the path (e.g. /account/{id}/ce/perspectives/...)
+  const ceIdx = segments.indexOf("ce");
+  if (ceIdx >= 0 && !result.module) {
+    result.module = "ce";
+  }
+
   const matches: Array<{ type: string; contextField: ContextField; id?: string }> = [];
 
   for (let i = 0; i < segments.length; i++) {
@@ -134,7 +85,6 @@ export function parseHarnessUrl(urlStr: string): ParsedHarnessUrl {
     const def = RESOURCE_SEGMENTS[seg];
     if (!def) continue;
 
-    // Check if the next segment is a resource ID
     const next = segments[i + 1];
     let id: string | undefined;
     if (
@@ -144,13 +94,12 @@ export function parseHarnessUrl(urlStr: string): ParsedHarnessUrl {
       !MODULES.has(next)
     ) {
       id = decodeURIComponent(next);
-      i++; // skip past the ID segment
+      i++;
     }
 
     matches.push({ type: def.type, contextField: def.contextField, id });
   }
 
-  // 6. Build result — set context fields from all matches, resource_id from the primary
   if (matches.length > 0) {
     const primary = matches[matches.length - 1]!;
     result.resource_type = primary.type;
@@ -169,20 +118,12 @@ export function parseHarnessUrl(urlStr: string): ParsedHarnessUrl {
   return result;
 }
 
-/** Fields that applyUrlDefaults will merge */
 const MERGEABLE_FIELDS: (keyof ParsedHarnessUrl)[] = [
   "org_id",
   "project_id",
   "module",
   "resource_type",
   "resource_id",
-  "pipeline_id",
-  "execution_id",
-  "agent_id",
-  "repo_id",
-  "registry_id",
-  "artifact_id",
-  "environment_id",
 ];
 
 /**
@@ -200,7 +141,6 @@ export function applyUrlDefaults(
   try {
     parsed = parseHarnessUrl(url);
   } catch {
-    // Invalid URL — return args unchanged
     return args;
   }
 

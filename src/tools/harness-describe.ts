@@ -10,11 +10,11 @@ export function registerDescribeTool(server: McpServer, registry: Registry): voi
       description: "Describe available Harness resource types, their supported operations, and fields. No API call — returns local metadata only. Use this to discover what resource_types you can use with other harness_ tools.",
       inputSchema: {
         resource_type: z.string().describe("Get details for a specific resource type").optional(),
-        toolset: z.string().describe("Filter to a specific toolset (e.g. pipelines, services)").optional(),
+        toolset: z.string().describe("Filter to a specific toolset (e.g. ccm)").optional(),
         search_term: z.string().describe("Search for resource types by keyword (matches type name, display name, toolset, description)").optional(),
       },
       annotations: {
-        title: "Describe Harness Resources",
+        title: "Describe CCM FinOps Resources",
         readOnlyHint: true,
         openWorldHint: false,
       },
@@ -37,16 +37,7 @@ export function registerDescribeTool(server: McpServer, registry: Registry): voi
               description: spec.description,
               bodySchema: spec.bodySchema ?? undefined,
             })),
-            executeActions: def.executeActions
-              ? Object.entries(def.executeActions).map(([action, spec]) => ({
-                  action,
-                  method: spec.method,
-                  description: spec.actionDescription,
-                  bodySchema: spec.bodySchema ?? undefined,
-                }))
-              : undefined,
             diagnosticHint: def.diagnosticHint ?? undefined,
-            executeHint: def.executeHint ?? undefined,
           });
         } catch (err) {
           // Resource type not found — return the compact summary with an error hint

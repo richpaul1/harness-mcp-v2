@@ -57,7 +57,6 @@ describe("Toolset structural validation", () => {
         const def = registry.getResource(type);
         const allSpecs: [string, EndpointSpec][] = [
           ...Object.entries(def.operations) as [string, EndpointSpec][],
-          ...Object.entries(def.executeActions ?? {}) as [string, EndpointSpec][],
         ];
 
         for (const [opName, spec] of allSpecs) {
@@ -92,7 +91,6 @@ describe("Toolset structural validation", () => {
         const def = registry.getResource(type);
         const allSpecs: [string, EndpointSpec][] = [
           ...Object.entries(def.operations) as [string, EndpointSpec][],
-          ...Object.entries(def.executeActions ?? {}) as [string, EndpointSpec][],
         ];
 
         for (const [opName, spec] of allSpecs) {
@@ -119,7 +117,6 @@ describe("Toolset structural validation", () => {
         const def = registry.getResource(type);
         const allSpecs: [string, EndpointSpec][] = [
           ...Object.entries(def.operations) as [string, EndpointSpec][],
-          ...Object.entries(def.executeActions ?? {}) as [string, EndpointSpec][],
         ];
 
         for (const [opName, spec] of allSpecs) {
@@ -266,11 +263,6 @@ describe("Toolset structural validation", () => {
         for (const [op, spec] of Object.entries(def.operations)) {
           if (!spec.responseExtractor) {
             missing.push(`${type}.${op}`);
-          }
-        }
-        for (const [action, spec] of Object.entries(def.executeActions ?? {})) {
-          if (!spec.responseExtractor) {
-            missing.push(`${type}.${action}`);
           }
         }
       }

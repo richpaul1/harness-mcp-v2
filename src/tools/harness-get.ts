@@ -6,16 +6,14 @@ import { jsonResult, errorResult } from "../utils/response-formatter.js";
 import { isUserError, isUserFixableApiError, toMcpError } from "../utils/errors.js";
 import { applyUrlDefaults } from "../utils/url-parser.js";
 import { asString } from "../utils/type-guards.js";
-import { resolveLogContent } from "../utils/log-resolver.js";
-import { buildLogPrefixFromExecution } from "../utils/log-prefix.js";
 
 export function registerGetTool(server: McpServer, registry: Registry, client: HarnessClient): void {
   server.registerTool(
     "harness_ccm_finops_get",
     {
-      description: "Get a Harness resource by ID. Accepts a Harness URL to auto-extract identifiers. For failure analysis, prefer harness_diagnose.",
+      description: "Get a CCM FinOps resource by ID. Accepts a Harness URL to auto-extract identifiers.",
       inputSchema: {
-        resource_type: z.string().describe("Resource type (e.g. pipeline, service, environment). Auto-detected from url.").optional(),
+        resource_type: z.string().describe("CCM resource type (e.g. cost_perspective, cost_budget, cost_recommendation). Auto-detected from url.").optional(),
         resource_id: z.string().describe("Primary resource identifier. Auto-detected from url.").optional(),
         url: z.string().describe("Harness UI URL — auto-extracts org, project, type, and ID").optional(),
         org_id: z.string().describe("Organization identifier (overrides default)").optional(),
@@ -23,7 +21,7 @@ export function registerGetTool(server: McpServer, registry: Registry, client: H
         params: z.record(z.string(), z.unknown()).describe("Additional identifiers for nested resources. Call harness_ccm_finops_describe for fields per resource_type.").optional(),
       },
       annotations: {
-        title: "Get Harness Resource",
+        title: "Get CCM FinOps Resource",
         readOnlyHint: true,
         openWorldHint: true,
       },
@@ -41,30 +39,9 @@ export function registerGetTool(server: McpServer, registry: Registry, client: H
 
         const def = registry.getResource(resourceType);
 
-        // Map resource_id to the primary identifier field
         const primaryField = def.identifierFields[0];
         if (primaryField && resourceId) {
           input[primaryField] = resourceId;
-        }
-
-        // execution_log: resolve full log content instead of returning a download URL
-        if (resourceType === "execution_log") {
-          try {
-            let prefix = asString(input.prefix);
-            if (!prefix) {
-              // Auto-build prefix from execution_id if available
-              const executionId = asString(input.execution_id);
-              if (!executionId) {
-                return errorResult("prefix or execution_id is required for execution_log. Provide a log prefix or an execution ID to auto-build it.");
-              }
-              prefix = await buildLogPrefixFromExecution(client, registry, executionId, input);
-            }
-            const logText = await resolveLogContent(client, prefix);
-            return jsonResult({ log_content: logText });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return errorResult(`Failed to fetch execution logs: ${msg}. Try harness_diagnose with include_logs=true for better failure analysis.`);
-          }
         }
 
         const result = await registry.dispatch(client, resourceType, "get", input);

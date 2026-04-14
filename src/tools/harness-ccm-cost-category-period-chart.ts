@@ -87,7 +87,8 @@ export function registerCcmCostCategoryPeriodChartTool(
         output_path: z
           .string()
           .describe(
-            "Optional workspace-relative or absolute path to save the PNG to disk. " +
+            "ABSOLUTE path to save the PNG to disk (e.g. '/Users/me/project/triage/assets/chart.png'). " +
+            "MUST be absolute — relative paths are rejected because the MCP server's cwd differs from your workspace. " +
             "When set the file is written to disk AND returned inline.",
           )
           .optional(),
@@ -168,8 +169,8 @@ export function registerCcmCostCategoryPeriodChartTool(
           title: `${shortTitle} — ${periodDays}d vs prior ${periodDays}d (excl. last ${excludeLast}d)`,
           y_label: "Cost (USD)",
           series: [
-            { key: "current", label: `Current: ${windows.currentLegend}`, color: "#22c55e" },
-            { key: "previous", label: `Previous: ${windows.previousLegend}`, color: "#ef4444" },
+            { key: "current", label: `Current: ${windows.currentLegend}`, color: "#86efac" },
+            { key: "previous", label: `Previous: ${windows.previousLegend}`, color: "#fca5a5" },
           ],
           points,
         };
@@ -209,12 +210,16 @@ export function registerCcmCostCategoryPeriodChartTool(
         };
 
         if (args.output_path) {
-          const outPath = path.isAbsolute(args.output_path)
-            ? args.output_path
-            : path.resolve(process.cwd(), args.output_path);
-          fs.mkdirSync(path.dirname(outPath), { recursive: true });
-          fs.writeFileSync(outPath, png);
-          summary.saved_to = outPath;
+          if (!path.isAbsolute(args.output_path)) {
+            return errorResult(
+              `output_path must be an absolute path (got '${args.output_path}'). ` +
+              "Relative paths resolve to the MCP server directory, not your workspace. " +
+              "Use the full path, e.g. '/Users/you/project/triage/assets/chart.png'.",
+            );
+          }
+          fs.mkdirSync(path.dirname(args.output_path), { recursive: true });
+          fs.writeFileSync(args.output_path, png);
+          summary.saved_to = args.output_path;
         }
 
         return chartResult(summary, png);

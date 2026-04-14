@@ -397,7 +397,8 @@ function firstNonEmptyStringList(...sources: unknown[]): string[] {
 
 /**
  * Optional `idFilter` clauses (QLCE) after view + time — scope perspective queries by GCP project,
- * GCP product, and/or cross-cloud product (same shapes as CE / scripts using idFilter + IN).
+ * GCP product, AWS account, AWS service, AWS line item type, cross-cloud product, and/or
+ * cost category bucket (same shapes as CE / scripts using idFilter + IN).
  */
 function buildOptionalPerspectiveIdFilters(input?: Record<string, unknown>): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
@@ -481,6 +482,55 @@ function buildOptionalPerspectiveIdFilters(input?: Record<string, unknown>): Rec
           identifier: "BUSINESS_MAPPING",
           identifierName: "Business Mapping",
         },
+      },
+    });
+  }
+
+  // AWS account filter — scope by awsUsageaccountid (parity with filter_gcp_project_id).
+  const awsAccounts = firstNonEmptyStringList(
+    input?.filter_aws_usage_account_ids,
+    input?.filter_aws_usage_account_id,
+  );
+  if (awsAccounts.length > 0) {
+    const f = OUTPUT_FIELDS.awsUsageaccountid!;
+    out.push({
+      idFilter: {
+        operator: "IN",
+        values: awsAccounts,
+        field: { fieldId: f.fieldId, fieldName: f.fieldName, identifier: f.identifier, identifierName: f.identifierName },
+      },
+    });
+  }
+
+  // AWS service filter — scope by awsServicecode.
+  const awsServices = firstNonEmptyStringList(
+    input?.filter_aws_services,
+    input?.filter_aws_service,
+  );
+  if (awsServices.length > 0) {
+    const f = OUTPUT_FIELDS.awsServicecode!;
+    out.push({
+      idFilter: {
+        operator: "IN",
+        values: awsServices,
+        field: { fieldId: f.fieldId, fieldName: f.fieldName, identifier: f.identifier, identifierName: f.identifierName },
+      },
+    });
+  }
+
+  // AWS line item type filter — scope by awsLineItemType.
+  // Use "Usage" to exclude RI/SP fees, credits, and tax entries that appear as "No Service".
+  const awsLineItemTypes = firstNonEmptyStringList(
+    input?.filter_aws_line_item_types,
+    input?.filter_aws_line_item_type,
+  );
+  if (awsLineItemTypes.length > 0) {
+    const f = OUTPUT_FIELDS.awsLineItemType!;
+    out.push({
+      idFilter: {
+        operator: "IN",
+        values: awsLineItemTypes,
+        field: { fieldId: f.fieldId, fieldName: f.fieldName, identifier: f.identifier, identifierName: f.identifierName },
       },
     });
   }
@@ -661,6 +711,45 @@ export const ccmToolset: ToolsetDefinition = {
     "Cloud cost visibility, analysis, recommendations, and anomaly detection. Covers perspectives, cost breakdowns, time series, summaries, recommendations, and anomalies.",
   resources: [
     // ------------------------------------------------------------------
+    // 0. cost_perspective_folder — REST list of perspective folders
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_perspective_folder",
+      displayName: "Cost Perspective Folder",
+      description:
+        "Perspective folders group related perspectives. Use harness_ccm_finops_list to discover folders, " +
+        "then list perspectives within a folder via cost_perspective with folder_id filter. " +
+        "Workflow: folder → perspectives → budget health (see harness_ccm_finops_budget_health).",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: ["folder_id"],
+      listFilterFields: [
+        { name: "search_term", description: "Search folders by name" },
+      ],
+      operations: {
+        list: {
+          method: "GET",
+          path: "/ccm/api/perspectiveFolders",
+          responseExtractor: (raw) => {
+            const r = raw as { status?: string; data?: Array<Record<string, unknown>> };
+            const data = r.data ?? [];
+            const items = data.map((f) => ({
+              id: f.uuid,
+              name: f.name,
+              viewType: f.viewType,
+              description: f.description ?? null,
+              pinned: f.pinned ?? false,
+            }));
+            return { items, total: items.length };
+          },
+          description:
+            "List all perspective folders. Returns id, name, viewType, description, pinned. " +
+            "Use the folder id with cost_perspective list (folder_id filter) to get perspectives in that folder.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
     // 1. cost_perspective — REST CRUD for perspective management
     // ------------------------------------------------------------------
     {
@@ -776,6 +865,26 @@ Optional: group_by (${VALID_GROUP_BY_FIELDS.join(", ")}), time_filter (${VALID_T
           description: "Scope to cross-cloud product name(s) (COMMON product); comma-separated or filter_products",
         },
         { name: "filter_products", description: "Array of COMMON product names" },
+        {
+          name: "filter_aws_usage_account_id",
+          description:
+            "Scope to AWS account id(s) (awsUsageaccountid) — comma-separated or use filter_aws_usage_account_ids. " +
+            "AWS parity with filter_gcp_project_id.",
+        },
+        { name: "filter_aws_usage_account_ids", description: "Array of AWS account ids" },
+        {
+          name: "filter_aws_service",
+          description:
+            "Scope to AWS service name(s) (awsServicecode, e.g. AmazonEC2) — comma-separated or use filter_aws_services",
+        },
+        { name: "filter_aws_services", description: "Array of AWS service names" },
+        {
+          name: "filter_aws_line_item_type",
+          description:
+            "Scope to AWS line item type(s) (e.g. Usage, SavingsPlanCoveredUsage). " +
+            "Use 'Usage' to exclude RI/SP fees, credits, and 'No Service' entries that distort service breakdowns.",
+        },
+        { name: "filter_aws_line_item_types", description: "Array of AWS line item types" },
         { name: "limit", description: "Result limit", type: "number" },
         { name: "offset", description: "Pagination offset", type: "number" },
       ],
@@ -867,6 +976,25 @@ Optional: time_filter (${VALID_TIME_FILTERS.join(", ")}), start_time_ms/end_time
         { name: "filter_gcp_products", description: "Array of GCP product names" },
         { name: "filter_product", description: "COMMON product name(s) to scope (comma-separated or filter_products)" },
         { name: "filter_products", description: "Array of COMMON product names" },
+        {
+          name: "filter_aws_usage_account_id",
+          description:
+            "Scope to AWS account id(s) (awsUsageaccountid) — comma-separated or use filter_aws_usage_account_ids",
+        },
+        { name: "filter_aws_usage_account_ids", description: "Array of AWS account ids" },
+        {
+          name: "filter_aws_service",
+          description:
+            "Scope to AWS service name(s) (awsServicecode, e.g. AmazonEC2) — comma-separated or use filter_aws_services",
+        },
+        { name: "filter_aws_services", description: "Array of AWS service names" },
+        {
+          name: "filter_aws_line_item_type",
+          description:
+            "Scope to AWS line item type(s) (e.g. Usage, SavingsPlanCoveredUsage). " +
+            "Use 'Usage' to exclude RI/SP fees, credits, and 'No Service' entries.",
+        },
+        { name: "filter_aws_line_item_types", description: "Array of AWS line item types" },
         { name: "limit", description: "Result limit", type: "number" },
       ],
       operations: {
@@ -943,6 +1071,23 @@ Use with no perspective_id to get CCM metadata (available connectors, default pe
         { name: "filter_gcp_products", description: "Array of GCP product names" },
         { name: "filter_product", description: "COMMON product name(s) to scope" },
         { name: "filter_products", description: "Array of COMMON product names" },
+        {
+          name: "filter_aws_usage_account_id",
+          description: "Scope to AWS account id(s) (awsUsageaccountid) — comma-separated or use filter_aws_usage_account_ids",
+        },
+        { name: "filter_aws_usage_account_ids", description: "Array of AWS account ids" },
+        {
+          name: "filter_aws_service",
+          description: "Scope to AWS service name(s) (awsServicecode, e.g. AmazonEC2) — comma-separated or use filter_aws_services",
+        },
+        { name: "filter_aws_services", description: "Array of AWS service names" },
+        {
+          name: "filter_aws_line_item_type",
+          description:
+            "Scope to AWS line item type(s) (e.g. Usage, SavingsPlanCoveredUsage). " +
+            "Use 'Usage' to exclude RI/SP fees, credits, and 'No Service' entries.",
+        },
+        { name: "filter_aws_line_item_types", description: "Array of AWS line item types" },
       ],
       operations: {
         list: {
@@ -1184,71 +1329,6 @@ harness_ccm_finops_get: With resource_id (recommendation ID) → summary for tha
           description:
             "Get recommendation details. With resource_id: summary for a single recommendation. " +
             "With perspective_id (via params): perspective-scoped recommendations with aggregate savings stats.",
-        },
-      },
-      executeActions: {
-        update_state: {
-          method: "POST",
-          path: "/ccm/api/recommendation/overview/change-state",
-          queryParams: {
-            recommendation_id: "recommendationId",
-            state: "state",
-          },
-          bodyBuilder: () => ({}),
-          bodySchema: { description: "No body required. State is set via recommendation_id and state query parameters.", fields: [] },
-          responseExtractor: ngExtract,
-          actionDescription: "Update a recommendation state. Pass recommendation_id and state (OPEN, APPLIED, IGNORED).",
-        },
-        override_savings: {
-          method: "PUT",
-          path: "/ccm/api/recommendation/overview/override-savings",
-          queryParams: {
-            recommendation_id: "recommendationId",
-            overridden_savings: "overriddenSavings",
-          },
-          bodyBuilder: () => ({}),
-          bodySchema: { description: "No body required. Savings override via recommendation_id and overridden_savings query parameters.", fields: [] },
-          responseExtractor: ngExtract,
-          actionDescription: "Override the estimated savings for a recommendation. Pass recommendation_id and overridden_savings.",
-        },
-        create_jira_ticket: {
-          method: "POST",
-          path: "/ccm/api/recommendation/jira/create",
-          bodyBuilder: (input) => ({
-            recommendationId: input.recommendation_id,
-            ...(typeof input.body === "object" && input.body !== null ? input.body as Record<string, unknown> : {}),
-          }),
-          bodySchema: {
-            description: "Jira ticket details for recommendation",
-            fields: [
-              { name: "recommendation_id", type: "string", required: true, description: "Recommendation ID" },
-              { name: "connectorIdentifier", type: "string", required: false, description: "Jira connector identifier" },
-              { name: "projectKey", type: "string", required: false, description: "Jira project key" },
-              { name: "issueType", type: "string", required: false, description: "Jira issue type" },
-              { name: "summary", type: "string", required: false, description: "Ticket summary" },
-            ],
-          },
-          responseExtractor: ngExtract,
-          actionDescription: "Create a Jira ticket for a recommendation. Pass recommendation_id and Jira details in body.",
-        },
-        create_snow_ticket: {
-          method: "POST",
-          path: "/ccm/api/recommendation/servicenow/create",
-          bodyBuilder: (input) => ({
-            recommendationId: input.recommendation_id,
-            ...(typeof input.body === "object" && input.body !== null ? input.body as Record<string, unknown> : {}),
-          }),
-          bodySchema: {
-            description: "ServiceNow ticket details for recommendation",
-            fields: [
-              { name: "recommendation_id", type: "string", required: true, description: "Recommendation ID" },
-              { name: "connectorIdentifier", type: "string", required: false, description: "ServiceNow connector identifier" },
-              { name: "ticketType", type: "string", required: false, description: "ServiceNow ticket type" },
-              { name: "description", type: "string", required: false, description: "Ticket description" },
-            ],
-          },
-          responseExtractor: ngExtract,
-          actionDescription: "Create a ServiceNow ticket for a recommendation. Pass recommendation_id and ServiceNow details in body.",
         },
       },
     },

@@ -109,12 +109,6 @@ export class Registry {
     return def?.operations[operation] !== undefined;
   }
 
-  /** Check if a resource type has execute actions. */
-  getExecuteActions(resourceType: string): Record<string, EndpointSpec & { actionDescription: string }> | undefined {
-    const def = this.resourceMap.get(resourceType);
-    return def?.executeActions;
-  }
-
   private static readonly READ_OPERATIONS: Set<OperationName> = new Set(["list", "get"]);
 
   /** Dispatch a CRUD operation to the Harness API. */
@@ -137,28 +131,6 @@ export class Registry {
     }
 
     return this.executeSpec(client, def, spec, input, signal);
-  }
-
-  /** Dispatch an execute action to the Harness API. */
-  async dispatchExecute(
-    client: HarnessClient,
-    resourceType: string,
-    action: string,
-    input: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<unknown> {
-    if (this.config.HARNESS_READ_ONLY) {
-      throw new Error(`Read-only mode is enabled (HARNESS_READ_ONLY=true). Execute actions are not allowed.`);
-    }
-
-    const def = this.getResource(resourceType);
-    const actionSpec = def.executeActions?.[action];
-    if (!actionSpec) {
-      const available = def.executeActions ? Object.keys(def.executeActions).join(", ") : "none";
-      throw new Error(`Resource "${resourceType}" has no execute action "${action}". Available: ${available}`);
-    }
-
-    return this.executeSpec(client, def, actionSpec, input, signal);
   }
 
   private async executeSpec(
@@ -458,7 +430,6 @@ export class Registry {
           description: r.description,
           scope: r.scope,
           operations: Object.keys(r.operations),
-          executeActions: r.executeActions ? Object.keys(r.executeActions) : undefined,
           identifierFields: r.identifierFields,
           listFilterFields: r.listFilterFields,
           diagnosticHint: r.diagnosticHint ?? undefined,
@@ -488,10 +459,7 @@ export class Registry {
       else if (def.description.toLowerCase().includes(q)) score = 20;
 
       if (score > 0) {
-        const ops = [
-          ...Object.keys(def.operations),
-          ...Object.keys(def.executeActions ?? {}),
-        ];
+        const ops = Object.keys(def.operations);
         results.push({
           type: def.resourceType,
           name: def.displayName,
@@ -514,9 +482,6 @@ export class Registry {
     for (const ts of this.toolsets) {
       for (const r of ts.resources) {
         const ops = Object.keys(r.operations);
-        if (r.executeActions) {
-          ops.push(...Object.keys(r.executeActions));
-        }
         resource_types.push({
           type: r.resourceType,
           name: r.displayName,
@@ -529,7 +494,7 @@ export class Registry {
       total_resource_types: this.resourceMap.size,
       total_toolsets: this.toolsets.length,
       resource_types,
-      hint: "Call harness_ccm_finops_describe(resource_type='<type>') for full details including diagnosticHint and executeHint.",
+      hint: "Call harness_ccm_finops_describe(resource_type='<type>') for full details including filter fields and diagnosticHint.",
     };
   }
 }

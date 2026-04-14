@@ -1,9 +1,0 @@
-I spoke with Adeeb and Arpit, and they have confirmed my decision to exit on 4/17. I am just not aligned with the way they execute. I have thought about what it would take to stay and this is what I came up with:
-
-- Before 4/17 I transition back to reporting to you
-- In the next pay review cycle, Harness beats my current offer for an annual OTE of $290K
-
-We can figure out a plan for the rest if the above works
-- Over the next few months, I transition my CCM account activities back to CS, making sure the customers are in a good place.
-- I would like to have  ownership at the module or initiative level, this includes Product/Engineering input, Sales Targets and Initial Customer Success for key new features/modules.
-- I want to also be involved at the code level, so if there are bugs or issues I know how to navigate and understand the architecture and be familiar enough to be able to fix bugs if I had to. I do not like heavily relying on other folks on critical matters.

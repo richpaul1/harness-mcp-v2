@@ -13,21 +13,21 @@ const GRID = "#27272a"; // Zinc 800
 const TEXT_PRIMARY = "#f4f4f5"; // Zinc 100
 const TEXT_SECONDARY = "#a1a1aa"; // Zinc 400
 
-// Gradients & Colors
-const BAR_TOP = "#818cf8"; // Indigo 400
-const BAR_BOTTOM = "#4f46e5"; // Indigo 600
-const LINE_COLOR = "#818cf8"; // Indigo 400
-const LINE_FILL_TOP = "rgba(129, 140, 248, 0.4)";
-const LINE_FILL_BOTTOM = "rgba(129, 140, 248, 0.0)";
+// Pastel palette — soft tones that read clearly on dark backgrounds
+const BAR_TOP = "#93c5fd"; // Blue 300
+const BAR_BOTTOM = "#60a5fa"; // Blue 400
+const LINE_COLOR = "#93c5fd"; // Blue 300
+const LINE_FILL_TOP = "rgba(147, 197, 253, 0.35)";
+const LINE_FILL_BOTTOM = "rgba(147, 197, 253, 0.0)";
 
 const GROUPED_COLORS = [
-  { top: "#34d399", bottom: "#059669" }, // Emerald
-  { top: "#f472b6", bottom: "#db2777" }, // Pink
-  { top: "#818cf8", bottom: "#4f46e5" }, // Indigo
-  { top: "#c084fc", bottom: "#9333ea" }, // Purple
-  { top: "#fb923c", bottom: "#ea580c" }, // Orange
-  { top: "#38bdf8", bottom: "#0284c7" }, // Sky
-  { top: "#facc15", bottom: "#ca8a04" }, // Yellow
+  { top: "#93c5fd", bottom: "#60a5fa" }, // Pastel Blue
+  { top: "#fca5a5", bottom: "#f87171" }, // Pastel Red
+  { top: "#fdba74", bottom: "#fb923c" }, // Pastel Orange
+  { top: "#86efac", bottom: "#4ade80" }, // Pastel Green
+  { top: "#d8b4fe", bottom: "#c084fc" }, // Pastel Purple
+  { top: "#fde68a", bottom: "#fbbf24" }, // Pastel Yellow
+  { top: "#67e8f9", bottom: "#22d3ee" }, // Pastel Cyan
 ];
 
 export type ChartSize = "medium" | "large";
@@ -194,7 +194,7 @@ export function renderCcmChartPng(spec: CcmChartSpec, opts: ChartRenderOptions):
     });
     ctx.stroke();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = "#a5b4fc";
+    ctx.strokeStyle = "#93c5fd";
     ctx.lineWidth = 1.5 * s;
     ctx.stroke();
     ctx.restore();

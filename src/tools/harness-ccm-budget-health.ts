@@ -9,6 +9,7 @@ import { isRecord } from "../utils/type-guards.js";
 interface BudgetItem {
   id: unknown;
   name: unknown;
+  perspectiveId: unknown;
   perspectiveName: unknown;
   period: unknown;
   budgetAmount: number;
@@ -23,6 +24,7 @@ interface BudgetItem {
 interface ClassifiedBudget {
   name: string;
   perspective: string;
+  perspective_id: string;
   period: string;
   budget_amount: number;
   actual_cost: number;
@@ -47,6 +49,7 @@ function parseBudgetItem(raw: unknown): BudgetItem | null {
   return {
     id: raw.id,
     name: raw.name,
+    perspectiveId: raw.perspectiveId,
     perspectiveName: raw.perspectiveName,
     period: raw.period,
     budgetAmount: ba,
@@ -142,6 +145,7 @@ export function registerCcmBudgetHealthTool(
           const classified: ClassifiedBudget = {
             name: String(b.name ?? ""),
             perspective: String(b.perspectiveName ?? ""),
+            perspective_id: String(b.perspectiveId ?? ""),
             period: String(b.period ?? ""),
             budget_amount: b.budgetAmount,
             actual_cost: Math.round(b.actualCost * 100) / 100,
