@@ -243,3 +243,239 @@ export const ccmBudgetDetailExtract = (raw: unknown): unknown => {
     period: r.data.budgetSummary?.period,
   };
 };
+
+// ---------------------------------------------------------------------------
+// Commitment Orchestration (Lightwing CO) extractors
+// ---------------------------------------------------------------------------
+
+interface LwResponse {
+  success?: boolean;
+  response?: unknown;
+  errors?: unknown;
+}
+
+function unwrapLw(raw: unknown): unknown {
+  const r = raw as LwResponse;
+  return r.response ?? raw;
+}
+
+/**
+ * CO summary — flatten into coverage, savings, and utilization at a glance.
+ */
+export const ccmCommitmentSummaryExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, unknown>;
+  const coverage = resp.coverage_percentage as Record<string, number> | undefined;
+  const savings = resp.savings as Record<string, unknown> | undefined;
+  const utilization = resp.utilization_percentage as Record<string, number> | undefined;
+
+  const riSavings = savings?.reserved_instances as Record<string, number> | undefined;
+  const spSavings = savings?.savings_plans as Record<string, number> | undefined;
+
+  return {
+    compute_spend: resp.compute_spend,
+    ondemand_spend: resp.ondemand_spend,
+    reservations_spend: resp.reservations_spend,
+    savings_plans_spend: resp.savings_plans_spend,
+    coverage: {
+      ondemand_pct: coverage?.ondemand,
+      reserved_instances_pct: coverage?.reserved_instances,
+      savings_plan_pct: coverage?.savings_plan,
+    },
+    savings: {
+      total: (savings?.total as number) ?? null,
+      reserved_instances: riSavings?.total ?? null,
+      reserved_instances_pct: riSavings?.percentage ?? null,
+      savings_plans: spSavings?.total ?? null,
+      savings_plans_pct: spSavings?.percentage ?? null,
+    },
+    utilization: {
+      reserved_instances_pct: utilization?.reserved_instances,
+      savings_plan_pct: utilization?.savings_plan,
+    },
+  };
+};
+
+/**
+ * CO coverage detail — extract per-type table summaries and chart data (sorted by date).
+ */
+export const ccmCommitmentCoverageExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, Record<string, unknown>>;
+  const types: Record<string, unknown> = {};
+
+  for (const [typeName, typeData] of Object.entries(resp)) {
+    if (!isRecord(typeData)) continue;
+    const table = typeData.table as Record<string, unknown> | undefined;
+    const chart = typeData.chart as Array<Record<string, unknown>> | undefined;
+    const sortedChart = Array.isArray(chart)
+      ? [...chart].sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? "")))
+      : [];
+
+    types[typeName] = {
+      summary: table ? {
+        total_cost: table.total_cost,
+        total_hours: table.total_hours,
+        on_demand_cost: table.on_demand_cost,
+        on_demand_hours: table.on_demand_hours,
+        reservation_cost: table.reservation_cost,
+        ri_coverage_hours: table.ri_coverage_hours,
+        savings_plan_hours: table.savings_plan_hours,
+      } : null,
+      chart: sortedChart,
+    };
+  }
+
+  return { commitment_types: types };
+};
+
+/**
+ * CO savings detail — extract per-type table total + sorted chart.
+ */
+export const ccmCommitmentSavingsExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, Record<string, unknown>>;
+  const types: Record<string, unknown> = {};
+
+  for (const [typeName, typeData] of Object.entries(resp)) {
+    if (!isRecord(typeData)) continue;
+    const table = typeData.table as Record<string, unknown> | undefined;
+    const chart = typeData.chart as Array<Record<string, unknown>> | undefined;
+    const sortedChart = Array.isArray(chart)
+      ? [...chart].sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? "")))
+      : [];
+
+    types[typeName] = {
+      total_savings: table?.total ?? null,
+      chart: sortedChart,
+    };
+  }
+
+  return { commitment_types: types };
+};
+
+/**
+ * CO utilization detail — extract per-type table + sorted chart.
+ */
+export const ccmCommitmentUtilisationExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, Record<string, unknown>>;
+  const types: Record<string, unknown> = {};
+
+  for (const [typeName, typeData] of Object.entries(resp)) {
+    if (!isRecord(typeData)) continue;
+    const table = typeData.table as Record<string, unknown> | undefined;
+    const chart = typeData.chart as Array<Record<string, unknown>> | undefined;
+    const sortedChart = Array.isArray(chart)
+      ? [...chart].sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? "")))
+      : [];
+
+    types[typeName] = {
+      compute_spend: table?.compute_spend ?? null,
+      utilization_amount: table?.utilization ?? null,
+      utilization_pct: table?.percentage ?? null,
+      trend_pct: table?.trend ?? null,
+      chart: sortedChart,
+    };
+  }
+
+  return { commitment_types: types };
+};
+
+/**
+ * CO filters — flatten response into typed arrays.
+ */
+export const ccmCommitmentFiltersExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, unknown>;
+  return {
+    account_ids: Array.isArray(resp.account_id) ? resp.account_id : [],
+    instance_families: Array.isArray(resp.instance_family) ? resp.instance_family : [],
+    regions: Array.isArray(resp.region) ? resp.region : [],
+  };
+};
+
+/**
+ * CO master accounts — compact list of connected payer accounts with CO status.
+ */
+export const ccmCommitmentAccountsExtract = (raw: unknown): { items: unknown[]; total: number } => {
+  const resp = unwrapLw(raw) as Record<string, unknown>;
+  const data = resp.data as Record<string, unknown> | undefined;
+  const content = Array.isArray(data?.content) ? data!.content as Array<Record<string, unknown>> : [];
+
+  const items = content.map((entry) => {
+    const connector = entry.connector as Record<string, unknown> | undefined;
+    const spec = connector?.spec as Record<string, unknown> | undefined;
+    const status = entry.status as Record<string, unknown> | undefined;
+    const features = Array.isArray(spec?.featuresEnabled) ? spec!.featuresEnabled as string[] : [];
+
+    return {
+      identifier: connector?.identifier ?? null,
+      name: connector?.name ?? null,
+      aws_account_id: spec?.awsAccountId ?? null,
+      type: connector?.type ?? null,
+      features_enabled: features,
+      co_enabled: features.includes("COMMITMENT_ORCHESTRATOR"),
+      connection_status: status?.status ?? null,
+      last_connected_at: status?.lastConnectedAt ?? null,
+    };
+  });
+
+  return { items, total: items.length };
+};
+
+/**
+ * CO spend detail (v2) — per-type spend with table (total, trend, service) and daily chart.
+ */
+export const ccmCommitmentSpendDetailExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, Record<string, unknown>>;
+  const types: Record<string, unknown> = {};
+
+  for (const [typeName, typeData] of Object.entries(resp)) {
+    if (!isRecord(typeData)) continue;
+    const table = typeData.table as Record<string, unknown> | undefined;
+    const chart = typeData.chart as Array<Record<string, unknown>> | undefined;
+    const sortedChart = Array.isArray(chart)
+      ? [...chart].sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? "")))
+      : [];
+
+    types[typeName] = {
+      total_spend: table?.total_spend ?? null,
+      trend_pct: table?.trend ?? null,
+      service: table?.service ?? null,
+      chart: sortedChart,
+    };
+  }
+
+  return { commitment_types: types };
+};
+
+/**
+ * CO savings overview (v2) — managed vs unmanaged savings split by RI and Savings Plans.
+ */
+export const ccmCommitmentSavingsOverviewExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, unknown>;
+  const sp = resp.savings_plans as Record<string, unknown> | undefined;
+  const ri = resp.reserved_instances as Record<string, unknown> | undefined;
+  const spManaged = sp?.managed_savings as Record<string, unknown> | undefined;
+  const spUnmanaged = sp?.unmanaged_savings as Record<string, unknown> | undefined;
+  const riManaged = ri?.managed_savings as Record<string, unknown> | undefined;
+  const riUnmanaged = ri?.unmanaged_savings as Record<string, unknown> | undefined;
+
+  return {
+    overall_savings: resp.overall_savings,
+    managed_savings_total: resp.managed_savings_total,
+    unmanaged_savings_total: resp.unmanaged_savings_total,
+    savings_plans: {
+      total: sp?.sp_total ?? null,
+      pct_of_total: sp?.sp_percentage ?? null,
+      managed: spManaged?.total ?? null,
+      managed_pct: spManaged?.percentage ?? null,
+      unmanaged: spUnmanaged?.total ?? null,
+      unmanaged_pct: spUnmanaged?.percentage ?? null,
+    },
+    reserved_instances: {
+      total: ri?.ri_total ?? null,
+      pct_of_total: ri?.ri_percentage ?? null,
+      managed: riManaged?.total ?? null,
+      managed_pct: riManaged?.percentage ?? null,
+      unmanaged: riUnmanaged?.total ?? null,
+      unmanaged_pct: riUnmanaged?.percentage ?? null,
+    },
+  };
+};

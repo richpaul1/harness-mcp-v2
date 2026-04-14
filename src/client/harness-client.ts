@@ -121,7 +121,7 @@ export class HarnessClient {
       ...options.headers,
     };
 
-    const ccmPath = options.path.includes("/ccm/");
+    const ccmPath = options.path.includes("/ccm/") || options.path.includes("/lw/");
     if (ccmPath && this.bearerToken) {
       headers["Authorization"] = `Bearer ${this.bearerToken}`;
     } else {

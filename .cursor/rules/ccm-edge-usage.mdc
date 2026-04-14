@@ -692,7 +692,115 @@ Or use `start_time_ms` / `end_time_ms` (epoch ms, UTC) for custom windows.
 
 ---
 
-## 14. Example prompts — getting started
+## 14. Commitment Orchestration (Reserved Instances & Savings Plans)
+
+Commitment Orchestration (CO) covers AWS Reserved Instances and Savings Plans — their coverage, savings, and utilization. All CO resources use the Lightwing API (`/lw/co/api/`).
+
+### Resource types
+
+| Resource | What it returns | Key filters |
+|----------|----------------|-------------|
+| `cost_commitment_summary` | High-level overview: coverage %, savings totals, utilization rates | `start_date`, `end_date` |
+| `cost_commitment_coverage` | Daily coverage chart + table by commitment type | `start_date`, `end_date`, `group_by` |
+| `cost_commitment_savings` | Daily savings chart + table by commitment type | `start_date`, `end_date`, `group_by` |
+| `cost_commitment_utilisation` | Daily utilization % chart + table with trend | `start_date`, `end_date` |
+| `cost_commitment_savings_overview` | Managed vs unmanaged savings split by RI and SP | `start_date`, `end_date`, `service` |
+| `cost_commitment_filters` | Available filter values (account IDs, instance families, regions) | `cloud_account_id`, `service` |
+| `cost_commitment_accounts` | Connected AWS payer accounts with CO enablement status | — |
+| `cost_commitment_analysis` | Spend breakdown by commitment type with daily chart and trend | `start_date`, `end_date`, `service`, `net_amortized` |
+
+### Workflow: Commitment health check
+
+```
+Step 1 — Summary snapshot
+  harness_ccm_finops_list(resource_type: "cost_commitment_summary",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14" })
+  → Coverage split (on-demand vs RI vs SP), total savings, utilization %
+
+Step 2 — Drill into coverage
+  harness_ccm_finops_list(resource_type: "cost_commitment_coverage",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14", group_by: "Commitment Type" })
+  → Daily cost/hours chart per type; chart this with harness_ccm_finops_chart
+
+Step 3 — Savings breakdown
+  harness_ccm_finops_list(resource_type: "cost_commitment_savings",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14", group_by: "Commitment Type" })
+  → Daily savings per commitment type
+
+Step 4 — Utilization health
+  harness_ccm_finops_list(resource_type: "cost_commitment_utilisation",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14" })
+  → RI utilization should be >80%; SP should be near 100%. Trend shows direction.
+
+Step 4b — Managed vs unmanaged savings
+  harness_ccm_finops_list(resource_type: "cost_commitment_savings_overview",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14" })
+  → Shows how much savings come from Harness-managed vs pre-existing commitments.
+  → Filter by service: filters: { service: "Amazon Relational Database Service" }
+
+Step 5 — Discover available filters
+  harness_ccm_finops_list(resource_type: "cost_commitment_filters",
+    filters: { service: "Amazon Elastic Compute Cloud - Compute" })
+  → Returns account IDs, instance families, regions for further drill-down
+
+Step 6 — Connected accounts
+  harness_ccm_finops_list(resource_type: "cost_commitment_accounts")
+  → Shows which AWS payer accounts have CO enabled (co_enabled: true)
+```
+
+### Workflow: Service-level savings drill-down (RDS vs EC2 vs ...)
+
+There is no single API call that returns savings across all services at once. To compare services, call `cost_commitment_savings_overview` or `cost_commitment_analysis` per service:
+
+```
+Step 1 — Get overall savings
+  harness_ccm_finops_list(resource_type: "cost_commitment_savings_overview",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14" })
+  → Total savings (managed + unmanaged), no service filter
+
+Step 2 — Drill into specific services (one call per service)
+  harness_ccm_finops_list(resource_type: "cost_commitment_savings_overview",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14",
+              service: "Amazon Relational Database Service" })
+
+  harness_ccm_finops_list(resource_type: "cost_commitment_savings_overview",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14",
+              service: "Amazon Elastic Compute Cloud - Compute" })
+
+Step 3 — Spend detail per service (with daily chart)
+  harness_ccm_finops_list(resource_type: "cost_commitment_analysis",
+    filters: { start_date: "2026-03-15", end_date: "2026-04-14",
+              service: "Amazon Relational Database Service",
+              net_amortized: true })
+  → Daily spend by commitment type (On-Demand vs RI vs SP) with trend %
+
+Step 4 — Chart the comparison
+  Aggregate results from step 2 into a grouped bar chart:
+  service name → managed savings, unmanaged savings, total savings
+```
+
+**Common AWS service names** (use exact strings — case-sensitive):
+- `Amazon Elastic Compute Cloud - Compute` (EC2)
+- `Amazon Relational Database Service` (RDS)
+- `Amazon ElastiCache` (ElastiCache)
+- `Amazon Redshift` (Redshift)
+- `Amazon OpenSearch Service` (OpenSearch)
+- `Amazon Elasticsearch Service` (legacy ES)
+
+**Discover services:** Use `cost_commitment_filters` to see available `account_id` and `instance_family` values. For service names, check your `cost_breakdown` with `group_by: awsServicecode` on the default AWS perspective.
+
+### Key points
+
+- **Dates are required** for summary/coverage/savings/utilization — use `YYYY-MM-DD` format.
+- **group_by values**: `"Commitment Type"` (default), `"Instance Family"`, `"Region"`.
+- **Service filter**: Use exact AWS service names (see list above). One service per call.
+- **Utilization signals**: Below 80% RI utilization → over-provisioned commitments. Near 100% SP → well-optimized.
+- **Chart data** comes pre-sorted by date — pass directly to `harness_ccm_finops_chart`.
+- **Coverage + savings + utilization** together tell the full story: what % is covered, how much that saves, and whether commitments are being used.
+
+---
+
+## 15. Example prompts — getting started
 
 Use these verbatim or adapt them. They cover the most common FinOps workflows and are a good starting point for new users.
 
@@ -746,6 +854,16 @@ The agent will return the exact mapping names (e.g. "Business Units", "Business 
 > "What are our top open savings recommendations across all clouds?"
 
 > "Are there any open recommendations for [your cost category bucket]?"
+
+### Commitment Orchestration (RI & Savings Plans)
+
+> "What's our current commitment coverage and savings for the last 30 days?"
+
+> "How are our Reserved Instances and Savings Plans utilized? Are any under-performing?"
+
+> "Show me a coverage breakdown by instance family for the last month."
+
+> "Which AWS payer accounts have Commitment Orchestration enabled?"
 
 ### Reports
 

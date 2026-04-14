@@ -146,8 +146,9 @@ export class Registry {
       for (const [inputKey, pathPlaceholder] of Object.entries(spec.pathParams)) {
         let value = input[inputKey];
         if (value === undefined || value === "") {
-          // Default scope placeholders from config for project/org-scoped resources
-          if (pathPlaceholder === "org" && (def.scope === "project" || def.scope === "org")) {
+          if (pathPlaceholder === "accountId") {
+            value = this.config.HARNESS_ACCOUNT_ID;
+          } else if (pathPlaceholder === "org" && (def.scope === "project" || def.scope === "org")) {
             value = this.config.HARNESS_DEFAULT_ORG_ID;
           } else if (pathPlaceholder === "project" && def.scope === "project") {
             value = this.config.HARNESS_DEFAULT_PROJECT_ID;
@@ -213,8 +214,8 @@ export class Registry {
       }
     }
 
-    // SaaS CCM REST endpoints often expect routingId alongside accountIdentifier
-    if (def.toolset === "ccm" && spec.path.startsWith("/ccm/api/")) {
+    // SaaS CCM REST + Lightwing CO endpoints expect routingId alongside accountIdentifier
+    if (def.toolset === "ccm" && (spec.path.startsWith("/ccm/api/") || spec.path.startsWith("/lw/"))) {
       params.routingId = this.config.HARNESS_ACCOUNT_ID;
     }
 

@@ -1,5 +1,5 @@
 import type { ToolsetDefinition } from "../types.js";
-import { ngExtract, pageExtract, passthrough, gqlExtract, ccmBusinessMappingListExtract, ccmBusinessMappingListCompactExtract, ccmRecommendationListCompactExtract, ccmBudgetListCompactExtract, ccmBudgetDetailExtract } from "../extractors.js";
+import { ngExtract, pageExtract, passthrough, gqlExtract, ccmBusinessMappingListExtract, ccmBusinessMappingListCompactExtract, ccmRecommendationListCompactExtract, ccmBudgetListCompactExtract, ccmBudgetDetailExtract, ccmCommitmentSummaryExtract, ccmCommitmentCoverageExtract, ccmCommitmentSavingsExtract, ccmCommitmentUtilisationExtract, ccmCommitmentFiltersExtract, ccmCommitmentAccountsExtract, ccmCommitmentSavingsOverviewExtract, ccmCommitmentSpendDetailExtract } from "../extractors.js";
 
 // ---------------------------------------------------------------------------
 // GraphQL queries — ported from the official Go MCP server
@@ -1845,104 +1845,297 @@ harness_ccm_finops_get: Time-series detail for a specific budget — month-by-mo
     },
 
     // ------------------------------------------------------------------
-    // 15. cost_commitment_coverage — Lightwing compute coverage
+    // 15. cost_commitment_summary — Lightwing CO high-level overview
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_commitment_summary",
+      displayName: "Cost Commitment Summary",
+      description:
+        "High-level commitment orchestration overview: compute spend split (on-demand vs RI vs savings plan), " +
+        "coverage percentages, total savings, and utilization rates. " +
+        "Start here to assess overall commitment health before drilling into coverage/savings/utilization details.",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: [],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/commitment-orchestration",
+      listFilterFields: [
+        { name: "start_date", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+        { name: "end_date", description: "End date (YYYY-MM-DD). Defaults to today." },
+      ],
+      diagnosticHint:
+        "Returns coverage %, savings totals, and utilization for RI + Savings Plans. " +
+        "Drill into cost_commitment_coverage, cost_commitment_savings, or cost_commitment_utilisation for daily charts.",
+      operations: {
+        list: {
+          method: "POST",
+          path: "/lw/co/api/accounts/{accountId}/v1/summary",
+          pathParams: { account_id: "accountId" },
+          queryParams: { start_date: "start_date", end_date: "end_date" },
+          bodyBuilder: () => ({ is_harness_managed: true }),
+          responseExtractor: ccmCommitmentSummaryExtract,
+          description: "Get commitment orchestration summary with coverage, savings, and utilization overview.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 16. cost_commitment_coverage — Lightwing compute coverage details
     // ------------------------------------------------------------------
     {
       resourceType: "cost_commitment_coverage",
       displayName: "Cost Commitment Coverage",
-      description: "Commitment (reserved instance / savings plan) compute coverage. Supports get.",
+      description:
+        "Daily compute coverage breakdown by commitment type (On-Demand, Reserved Instances, Savings Plans). " +
+        "Returns daily chart data (coverage_cost, coverage_hours) plus table summaries per type. " +
+        "Use group_by to segment by 'Commitment Type' (default), 'Instance Family', or 'Region'.",
       toolset: "ccm",
       scope: "account",
       identifierFields: [],
       deepLinkTemplate: "/ng/account/{accountId}/ce/commitment-orchestration",
+      listFilterFields: [
+        { name: "start_date", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+        { name: "end_date", description: "End date (YYYY-MM-DD). Defaults to today." },
+        { name: "group_by", description: "Group coverage by: 'Commitment Type' (default), 'Instance Family', 'Region'." },
+      ],
+      diagnosticHint:
+        "Chart data is sorted by date. Each commitment type has a table summary with total_cost, total_hours, " +
+        "on_demand_cost, reservation_cost, ri_coverage_hours, and savings_plan_hours.",
       operations: {
-        get: {
+        list: {
           method: "POST",
           path: "/lw/co/api/accounts/{accountId}/v1/detail/compute_coverage",
           pathParams: { account_id: "accountId" },
-          bodyBuilder: (input) => input.body ?? {},
-          responseExtractor: passthrough,
-          description: "Get commitment compute coverage details",
+          queryParams: { start_date: "start_date", end_date: "end_date" },
+          bodyBuilder: (input) => ({
+            group_by: (input.group_by as string) ?? "Commitment Type",
+          }),
+          responseExtractor: ccmCommitmentCoverageExtract,
+          description: "Get daily compute coverage breakdown by commitment type with chart and table data.",
         },
       },
     },
 
     // ------------------------------------------------------------------
-    // 16. cost_commitment_savings — Lightwing savings
+    // 17. cost_commitment_savings — Lightwing savings details
     // ------------------------------------------------------------------
     {
       resourceType: "cost_commitment_savings",
       displayName: "Cost Commitment Savings",
-      description: "Commitment savings details. Supports get.",
+      description:
+        "Daily savings breakdown by commitment type (Reserved Instances, Savings Plans). " +
+        "Returns per-type chart data (date, savings) and table total. " +
+        "Use group_by to segment by 'Commitment Type' (default), 'Instance Family', or 'Region'.",
       toolset: "ccm",
       scope: "account",
       identifierFields: [],
       deepLinkTemplate: "/ng/account/{accountId}/ce/commitment-orchestration",
+      listFilterFields: [
+        { name: "start_date", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+        { name: "end_date", description: "End date (YYYY-MM-DD). Defaults to today." },
+        { name: "group_by", description: "Group savings by: 'Commitment Type' (default), 'Instance Family', 'Region'." },
+      ],
+      diagnosticHint:
+        "Shows how much each commitment type saved vs on-demand pricing. " +
+        "Combine with cost_commitment_summary for a quick savings-to-spend ratio.",
       operations: {
-        get: {
+        list: {
           method: "POST",
           path: "/lw/co/api/accounts/{accountId}/v1/detail/savings",
           pathParams: { account_id: "accountId" },
-          bodyBuilder: (input) => input.body ?? {},
-          responseExtractor: passthrough,
-          description: "Get commitment savings details",
+          queryParams: { start_date: "start_date", end_date: "end_date" },
+          bodyBuilder: (input) => ({
+            group_by: (input.group_by as string) ?? "Commitment Type",
+            is_harness_managed: true,
+          }),
+          responseExtractor: ccmCommitmentSavingsExtract,
+          description: "Get daily savings breakdown by commitment type.",
         },
       },
     },
 
     // ------------------------------------------------------------------
-    // 17. cost_commitment_utilisation — Lightwing utilisation
+    // 18. cost_commitment_utilisation — Lightwing utilisation details
     // ------------------------------------------------------------------
     {
       resourceType: "cost_commitment_utilisation",
       displayName: "Cost Commitment Utilisation",
-      description: "Commitment utilisation details. Supports get.",
+      description:
+        "Daily utilization percentage for Reserved Instances and Savings Plans. " +
+        "Returns per-type chart data (date, utilization_percentage) plus table with compute_spend, " +
+        "utilization amount, percentage, and trend. Low utilization signals wasted commitments.",
       toolset: "ccm",
       scope: "account",
       identifierFields: [],
       deepLinkTemplate: "/ng/account/{accountId}/ce/commitment-orchestration",
+      listFilterFields: [
+        { name: "start_date", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+        { name: "end_date", description: "End date (YYYY-MM-DD). Defaults to today." },
+      ],
+      diagnosticHint:
+        "Utilization below 80% indicates over-provisioned commitments. " +
+        "Trend shows direction (negative = declining utilization). " +
+        "Cross-reference with cost_commitment_coverage to understand the spend mix.",
       operations: {
-        get: {
+        list: {
           method: "POST",
           path: "/lw/co/api/accounts/{accountId}/v1/detail/commitment_utilisation",
           pathParams: { account_id: "accountId" },
-          bodyBuilder: (input) => input.body ?? {},
-          responseExtractor: passthrough,
-          description: "Get commitment utilisation details",
+          queryParams: { start_date: "start_date", end_date: "end_date" },
+          bodyBuilder: () => ({ is_harness_managed: true }),
+          responseExtractor: ccmCommitmentUtilisationExtract,
+          description: "Get daily utilization percentages for RI and Savings Plan commitments.",
         },
       },
     },
 
     // ------------------------------------------------------------------
-    // 18. cost_commitment_analysis — Lightwing spend detail v2
+    // 19. cost_commitment_savings_overview — Lightwing savings overview (v2)
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_commitment_savings_overview",
+      displayName: "Cost Commitment Savings Overview",
+      description:
+        "Savings overview split by managed (Harness-orchestrated) vs unmanaged commitments, " +
+        "broken down by Reserved Instances and Savings Plans. Shows how much of your savings " +
+        "come from Harness-managed commitments vs pre-existing ones. Filter by AWS service.",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: [],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/commitment-orchestration",
+      listFilterFields: [
+        { name: "start_date", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+        { name: "end_date", description: "End date (YYYY-MM-DD). Defaults to today." },
+        { name: "service", description: "Filter by AWS service (e.g. 'Amazon Relational Database Service', 'Amazon Elastic Compute Cloud - Compute')." },
+      ],
+      diagnosticHint:
+        "Managed savings are from Harness-orchestrated commitments. Unmanaged are pre-existing. " +
+        "High unmanaged % means most savings come from commitments Harness didn't create — " +
+        "opportunity to migrate more under Harness management.",
+      operations: {
+        list: {
+          method: "POST",
+          path: "/lw/co/api/accounts/{accountId}/v2/savings/overview",
+          pathParams: { account_id: "accountId" },
+          queryParams: { start_date: "start_date", end_date: "end_date" },
+          bodyBuilder: (input) => {
+            const body: Record<string, unknown> = {};
+            if (input.service) body.service = input.service;
+            return body;
+          },
+          responseExtractor: ccmCommitmentSavingsOverviewExtract,
+          description: "Get savings overview with managed vs unmanaged breakdown by RI and Savings Plans.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 20. cost_commitment_filters — Lightwing available filter values
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_commitment_filters",
+      displayName: "Cost Commitment Filters",
+      description:
+        "Available filter values for commitment orchestration queries: AWS account IDs, " +
+        "instance families, and regions. Use to discover valid filter values before drilling " +
+        "into coverage/savings/utilization by specific account or service.",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: [],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/commitment-orchestration",
+      listFilterFields: [
+        { name: "cloud_account_id", description: "Filter by specific AWS cloud account ID." },
+        { name: "service", description: "Filter by AWS service name (e.g. 'Amazon Elastic Compute Cloud - Compute')." },
+      ],
+      operations: {
+        list: {
+          method: "POST",
+          path: "/lw/co/api/accounts/{accountId}/v1/filters",
+          pathParams: { account_id: "accountId" },
+          queryParams: { cloud_account_id: "cloud_account_id", service: "service" },
+          bodyBuilder: () => ({}),
+          responseExtractor: ccmCommitmentFiltersExtract,
+          description: "List available filter values (account IDs, instance families, regions) for CO queries.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 20. cost_commitment_accounts — Lightwing connected payer accounts
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_commitment_accounts",
+      displayName: "Cost Commitment Accounts",
+      description:
+        "List AWS master/payer accounts connected for Commitment Orchestration. " +
+        "Shows connector status, AWS account ID, features enabled (BILLING, COMMITMENT_ORCHESTRATOR), " +
+        "and connection health. Use to verify which accounts have CO enabled.",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: [],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/commitment-orchestration",
+      operations: {
+        list: {
+          method: "POST",
+          path: "/lw/co/api/accounts/{accountId}/v1/setup/listMasterAccounts",
+          pathParams: { account_id: "accountId" },
+          bodyBuilder: () => ({}),
+          responseExtractor: ccmCommitmentAccountsExtract,
+          description: "List AWS payer accounts with Commitment Orchestration status and connection health.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 21. cost_commitment_analysis — Lightwing spend detail v2
     // ------------------------------------------------------------------
     {
       resourceType: "cost_commitment_analysis",
       displayName: "Cost Commitment Analysis",
-      description: "Commitment spend analysis. Supports get.",
+      description:
+        "Commitment spend breakdown by type (On-Demand, Reserved Instances, Savings Plans) " +
+        "with daily chart and table summaries including trend %. " +
+        "Filter by AWS service to see per-service spend. Use net_amortized for amortized cost view.",
       toolset: "ccm",
       scope: "account",
       identifierFields: [],
       deepLinkTemplate: "/ng/account/{accountId}/ce/commitment-orchestration",
+      listFilterFields: [
+        { name: "start_date", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+        { name: "end_date", description: "End date (YYYY-MM-DD). Defaults to today." },
+        { name: "service", description: "Filter by AWS service (e.g. 'Amazon Relational Database Service', 'Amazon Elastic Compute Cloud - Compute')." },
+        { name: "net_amortized", description: "Use net amortized cost (true/false). Default false.", type: "boolean" },
+      ],
+      diagnosticHint:
+        "Shows actual spend per commitment type with trend. " +
+        "Negative trend = spend declining. Positive trend = spend increasing. " +
+        "Combine with cost_commitment_savings to see spend vs savings side by side.",
       operations: {
-        get: {
+        list: {
           method: "POST",
           path: "/lw/co/api/accounts/{accountId}/v2/spend/detail",
           pathParams: { account_id: "accountId" },
-          bodyBuilder: (input) => input.body ?? {},
-          responseExtractor: passthrough,
-          description: "Get commitment spend analysis details",
+          queryParams: { start_date: "start_date", end_date: "end_date" },
+          bodyBuilder: (input) => {
+            const body: Record<string, unknown> = {};
+            if (input.service) body.service = input.service;
+            if (input.net_amortized !== undefined) body.net_amortized = input.net_amortized;
+            return body;
+          },
+          responseExtractor: ccmCommitmentSpendDetailExtract,
+          description: "Get commitment spend breakdown by type with daily chart and trend.",
         },
       },
     },
 
     // ------------------------------------------------------------------
-    // 19. cost_estimated_savings — Lightwing estimated savings per cloud account
+    // 22. cost_estimated_savings — Lightwing estimated savings per cloud account
     // ------------------------------------------------------------------
     {
       resourceType: "cost_estimated_savings",
       displayName: "Cost Estimated Savings",
-      description: "Estimated savings for a cloud account setup. Supports get. Pass account_id and cloud_account_id.",
+      description:
+        "Estimated savings for a specific cloud account setup. " +
+        "Pass cloud_account_id as resource_id to see projected savings from commitment optimization.",
       toolset: "ccm",
       scope: "account",
       identifierFields: ["cloud_account_id"],
@@ -1957,7 +2150,7 @@ harness_ccm_finops_get: Time-series detail for a specific budget — month-by-mo
           },
           bodyBuilder: (input) => input.body ?? {},
           responseExtractor: passthrough,
-          description: "Get estimated savings for a cloud account",
+          description: "Get estimated savings for a cloud account.",
         },
       },
     },
