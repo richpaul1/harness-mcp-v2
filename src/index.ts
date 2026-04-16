@@ -40,7 +40,16 @@ function createHarnessServer(config: Config): McpServer {
       icons: [{ src: "https://app.harness.io/favicon.ico" }],
       websiteUrl: "https://harness.io",
     },
-    { capabilities: { logging: {} } },
+    {
+      capabilities: { logging: {} },
+      instructions:
+        "IMPORTANT: Call harness_ccm_finops_guide (no parameters) at the start of every " +
+        "session. It returns the complete agent guide covering all tool calling conventions, " +
+        "resource types, group_by dimensions, time filters, spike/anomaly patterns, " +
+        "recommendations, budgets, commitment orchestration, AutoStopping, maturity charts, " +
+        "report rendering, and the full BVR playbook. Without this guide you will not know " +
+        "how to use the other tools correctly.",
+    },
   );
 
   registerAllTools(server, registry, client, config);

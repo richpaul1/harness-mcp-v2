@@ -8,6 +8,10 @@ alwaysApply: true
 
 MCP server: **`http://localhost:3000/mcp`**
 Tool prefix: **`harness_ccm_finops_`**
+
+> **Session start:** Call `harness_ccm_finops_guide` (no parameters) to load the full protocol
+> into your context. Every section below is returned by that tool — this rule is a summary only.
+
 ---
 
 ## 1. Bootstrap — discover what's available
