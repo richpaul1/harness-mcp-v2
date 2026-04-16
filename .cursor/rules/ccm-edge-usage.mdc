@@ -1,7 +1,8 @@
 ---
-description: Harness CCM FinOps Agent — bootstrap metadata, perspectives, cost categories, breakdown, anomalies, recommendations, budgets, charts, spike triage
+description: Harness CCM FinOps Agent — complete guide: bootstrap, perspectives, cost categories, breakdown, anomalies, recommendations, budgets, charts, spike triage, maturity, report renderer, BVR playbook
 alwaysApply: true
 ---
+
 
 # Harness CCM FinOps Agent — how to work
 
@@ -864,6 +865,13 @@ AutoStopping automatically shuts down idle cloud resources (VMs, ECS, RDS, Kuber
 
 Use these verbatim or adapt them. They cover the most common FinOps workflows and are a good starting point for new users.
 
+### Bootstrap this guide
+
+> "Load the full FinOps agent guide."
+
+Call `harness_ccm_finops_guide` with no parameters — returns this complete document so you have
+all tool calling conventions, resource types, patterns, and the BVR playbook available in context.
+
 ### Before you start — personalise the placeholders
 
 These prompts use generic placeholders in `[square brackets]`. Before using them, ask the agent to discover your account's structure:
@@ -1060,5 +1068,887 @@ Use the queries in preceding sections to gather evidence, then map to a score:
 | Automated recurring reports; BVR cadence established | 3 — Run |
 
 *Assessed from customer engagement, not a direct API query.*
+
+---
+
+## 18. Report Renderer — `harness_ccm_finops_report_render`
+
+Use this tool whenever the user asks for a **BVR report**, **maturity assessment PDF**, **executive
+report**, **themed HTML report**, or anything that needs to be delivered as a polished, paginated
+document rather than a chat-style markdown dump.
+
+### What it does
+
+The tool takes a markdown file (with YAML frontmatter + image references) and registers it with the
+**in-process report renderer** that ships inside the MCP server. By default it **auto-opens the
+report in the user's default browser** (using `open` on macOS, `xdg-open` on Linux, `start` on
+Windows). The user picks a theme via the sidebar dropdown and clicks **Export PDF** when ready.
+The MCP agent does not generate the PDF; the browser does.
+
+In **HTTP transport mode**, reports live at `http://localhost:<MCP_PORT>/reports/<id>/` — the same
+host and port as the MCP endpoint. In **stdio transport mode**, the renderer lazily starts a
+dedicated listener on `HARNESS_REPORT_PORT` (default `4321`) and reports live there.
+
+The returned `url` is **verified reachable** before the tool returns — if the renderer can't serve
+the doc (markdown moved, registry desync, etc.) the tool fails loudly rather than handing back a
+broken link.
+
+### When to use this vs other tools
+
+| Need | Tool |
+|---|---|
+| Polished, paginated BVR / maturity report with cover page, TOC, themed styling | `harness_ccm_finops_report_render` |
+| Quick one-off PDF of ad-hoc markdown (triage notes, summary) | `markdown_to_pdf` |
+| Render a single chart PNG | `harness_ccm_finops_chart` |
+| Render FinOps Maturity spider chart PNG | `harness_ccm_finops_maturity_chart` |
+
+### Tool call
+
+```json
+{
+  "tool": "harness_ccm_finops_report_render",
+  "markdown_path": "/absolute/path/to/customer-bvr.md",
+  "theme": "harness",
+  "id": "acme-q1-bvr",
+  "label": "Acme Q1 FY26 BVR",
+  "open_in_browser": true
+}
+```
+
+- **`markdown_path`** (required, absolute): path to the `.md` file with YAML frontmatter. The
+  **directory containing this file is automatically served as the report's web root** — any
+  relative URL inside the markdown (`assets/chart.png`, `images/foo.svg`, `sub/dir/inline.png`,
+  `bare.png`) resolves directly off disk. No separate assets directory to register.
+- **`base_dir`** (optional, absolute): override for the web root. Default is `dirname(markdown_path)`.
+  Use this only when your markdown lives somewhere different from the assets it references.
+- **`theme`** (optional): initial theme — `harness`, `modern`, `glass`, or `kinetic`. The user can
+  switch themes in the browser.
+- **`id`** (optional): stable slug for a pinned URL; re-running with the same ID returns the same
+  URL. Defaults to filename-slug + hash of the absolute path (so the same markdown path always gets
+  the same URL).
+- **`label`** (optional): human-readable label for multi-doc indexes.
+- **`open_in_browser`** (optional, default `true`): auto-open the URL in the user's default
+  browser. Set to `false` for headless / remote-MCP environments where the browser launcher would
+  open on the wrong machine.
+
+Returns (HTTP mode — reports share the MCP port, default 3000):
+```json
+{
+  "id": "acme-q1-bvr",
+  "url": "http://localhost:3000/reports/acme-q1-bvr/?theme=harness",
+  "markdown_link": "[Open Acme Q1 FY26 BVR in browser](http://localhost:3000/reports/acme-q1-bvr/?theme=harness)",
+  "opened_in_browser": true,
+  "print_url": "http://localhost:3000/reports/acme-q1-bvr/?mode=print&theme=harness",
+  "pdf_url": "http://localhost:3000/reports/acme-q1-bvr/download?theme=harness",
+  "theme": "harness",
+  "available_themes": ["glass", "harness", "kinetic", "modern"],
+  "content_path": "...",
+  "base_dir": "...",
+  "label": "Acme Q1 FY26 BVR",
+  "renderer_base_url": "http://localhost:3000"
+}
+```
+
+In stdio mode `url` uses `HARNESS_REPORT_PORT` (default `4321`) instead.
+
+The browser opens automatically. Surface `markdown_link` (or `url`) to the user so they have a
+clickable backup if the auto-open didn't fire (e.g. running over a remote MCP).
+
+### Markdown authoring conventions
+
+The renderer expects a specific markdown dialect. The cleaner the markdown, the better the output.
+
+#### 1. YAML frontmatter (drives the cover page)
+
+```yaml
+---
+title: FinOps Maturity Assessment
+subtitle: Cloud financial operations readiness
+customer: Acme Holdings
+docType: Business Value Review
+date: April 16, 2026
+author: Harness CCM FinOps Agent
+classification: Confidential
+---
+```
+
+#### 2. Image references
+
+Use **relative paths** — anything in the markdown's directory (or below) is served:
+
+```markdown
+![FinOps Maturity Spider Chart](assets/maturity_chart.png)
+![Inline diagram](inline.png)
+![Nested asset](images/q1/spend-trend.png)
+```
+
+The renderer serves these at `/reports/<id>/<same-relative-path>`. There is no fixed assets/
+prefix — whatever directory layout you use under `dirname(markdown_path)` is what the URL exposes.
+Generate PNGs with `harness_ccm_finops_chart` / `harness_ccm_finops_maturity_chart` /
+`harness_ccm_finops_cost_category_chart` and save them anywhere inside that directory tree
+**before** calling this tool.
+
+#### 3. Callouts
+
+```markdown
+::: critical Azure governance failure
+Azure spend grew from $329K to $4.1M/month with zero alerts fired.
+:::
+
+::: success Benchmark met
+RI utilization at 95.1% — above the 80% benchmark.
+:::
+
+::: action To reach Run (3.0)
+- Enable K8s AutoStopping
+- Schedule weekly agent briefing
+:::
+```
+
+Supported types: `critical`, `risk`, `warning`, `success`, `info`, `action`, `quote`.
+
+#### 4. Metric card grid
+
+```markdown
+::: metrics
+- label: Monthly savings
+  value: $166,312
+  trend: $1.99M annualised
+  tone: success
+- label: Open recs
+  value: $92,833
+  trend: $1.11M opportunity
+  tone: risk
+:::
+```
+
+Tones: `success`, `critical`, `risk`, `warning`, `info`, or omit for default.
+
+#### 5. Standard markdown
+
+Regular headings (`#`, `##`, `###`) feed the sidebar TOC. Tables, footnotes, definition lists, and
+task lists all render with theme-aware styling.
+
+### Themes
+
+| Theme | Feel | Palette | Best for |
+|---|---|---|---|
+| `harness` (default) | Corporate executive BVR | Navy + amber, Fraunces serif | Formal customer-facing BVRs |
+| `modern` | Editorial / startup | Near-black + coral, Space Grotesk | Internal / bold design |
+| `glass` | Adaptive liquid-glass | Iridescent peach/violet + translucent panels | High-visual-impact showcases |
+| `kinetic` | Scrollytelling + functional motion | Near-black + lime + coral, Bricolage Grotesque | Interactive web viewing (not PDF-first) |
+
+The user can switch themes in the browser via the sidebar dropdown — no need to re-run the tool
+unless you want a different initial theme.
+
+### Typical BVR workflow
+
+1. Gather data via the usual CCM queries (sections 1–17).
+2. Render chart PNGs to an assets directory:
+   - `harness_ccm_finops_maturity_chart → maturity_chart.png`
+   - `harness_ccm_finops_chart → budget_status.png, cloud_spend_mom.png, …`
+3. Write the BVR markdown with YAML frontmatter + `:::callouts` + `![](assets/…)` references.
+4. Call `harness_ccm_finops_bvr_render` with the absolute markdown path.
+5. Hand the returned `url` to the user.
+
+### Environment configuration
+
+The renderer runs in-process inside the MCP server — no separate install or service.
+
+- **HTTP mode**: reports share the MCP `PORT` (default `3000`). No extra config needed.
+- **Stdio mode**: lazy-starts an embedded listener on `HARNESS_REPORT_PORT` (default `4321`).
+
+### Limitations
+
+- PDF export requires Playwright + Chromium: `npx playwright install chromium` (one-time setup).
+- If you only need the browser view, Chromium is optional.
+- The report registry lives in process memory — if the MCP server restarts, already-registered
+  reports need to be re-registered. Re-registering by the same `markdown_path` is idempotent and
+  produces the same URL.
+
+---
+
+---
+
+## 19. Business Value Review (BVR) — Complete Playbook
+
+# Harness CCM Business Value Review (BVR)
+
+**Customer Name:** [Insert Customer Name]
+**Date:** [Insert Date]
+**Harness Team:** [Insert Names]
+**Customer Attendees:** [Insert Names/Titles]
+**Current FinOps Maturity Stage:** [Insert Stage 1-5]
+
+---
+
+## BVR Preparation — How to Use the FinOps Agent
+
+Run these steps **before** the BVR meeting to pre-populate every `[Insert Data]` field below.
+
+### Step 0 — Bootstrap (always run first)
+
+```
+harness_ccm_finops_list  resource_type: "cost_metadata"
+```
+
+Captures: which clouds are connected, default perspective IDs, currency symbol. Save the
+`defaultAwsPerspectiveId`, `defaultGcpPerspectiveId`, `defaultClusterPerspectiveId` — you will
+need them throughout the BVR.
+
+### Step 1 — Discover cost categories (BU mappings)
+
+```
+harness_ccm_finops_list  resource_type: "cost_category"
+```
+
+Returns all business mapping names (e.g. "Business Units", "Business Domains") and their bucket
+lists. Pick the primary mapping name; substitute it as `<BU_MAPPING>` in every query below.
+
+### Step 2 — Run section queries in order
+
+Each section below has an **"Agent Queries"** block. Run those queries and paste the key numbers
+into the `[Insert Data]` fields in the tables.
+
+### Step 3 — Generate charts into an assets directory
+
+Create a dedicated assets directory for this BVR (e.g. `/path/to/<customer>-bvr/assets/`) and save
+every chart PNG into it. Use absolute paths for `output_path`:
+
+- Maturity spider: `harness_ccm_finops_maturity_chart → maturity_chart.png`
+- Cost trends / breakdowns: `harness_ccm_finops_chart → budget_status.png`, `cloud_spend_mom.png`, etc.
+- Cost-category period comparison: `harness_ccm_finops_cost_category_chart → cost_by_bu.png`
+
+### Step 4 — Author the BVR markdown
+
+Create `<customer>-bvr.md` alongside the assets folder. Include YAML frontmatter for the cover
+page, reference charts with relative paths (`![Alt text](assets/maturity_chart.png)`), and use
+`:::critical` / `:::success` / `:::action` / `::: metrics` blocks for highlights.
+See **Section 18 of this guide** for the full markdown dialect.
+
+### Step 5 — Hand off to the BVR renderer
+
+```
+harness_ccm_finops_report_render
+  markdown_path: "/absolute/path/to/<customer>-bvr.md"
+  theme:         "harness"                                    # user can switch in browser
+  id:            "<customer>-bvr"                             # stable pinned URL
+  label:         "<Customer> BVR · <Quarter> <FY>"
+```
+
+Return the `url` from the response as the **primary deliverable**. The user opens it, chooses a
+theme (harness / modern / glass / kinetic) via the sidebar, and clicks **Export PDF** to download
+a paginated report.
+
+---
+
+## I. Executive Summary & Goals
+
+### FinOps Maturity Assessment
+Identify the customer's current stage and define the requirements to unlock the next level of maturity.
+
+| Stage | Focus | Key Indicators for Completion |
+| :--- | :--- | :--- |
+| **1. Visibility** | Centralized cost data | Perspectives, Cost Categories, and Dashboards are live. |
+| **2. Optimization** | Active savings actions | AutoStopping, Recommendations, Commitment Orchestrator active. |
+| **3. Governance** | Policy-enforced control | Asset Governance, Budgets with alerts, Anomaly detection live. |
+| **4. Accountability** | Allocated team costs | Cost per BU, Cost per Product, active chargeback capability. |
+| **5. Forecasting** | Predictable future spend | FY-based savings forecasting, budget vs. actuals tracking. |
+
+> **Agent quick-score:** Each section II deep-dive has a "benchmark met?" signal. Tally how many of
+> the 7 sections are green to estimate the stage:  
+> 1–2 green → Stage 1–2 · 3–4 green → Stage 3 · 5–6 green → Stage 4 · 7 green → Stage 5.
+
+### FinOps Maturity Spider Chart
+
+After running all section queries below, call `harness_ccm_finops_maturity_chart` to render the
+**Crawl / Walk / Run radar chart**. Use the scoring rubric in Section 17 of this guide
+to map collected evidence to a 1–3 score per dimension.
+
+```
+harness_ccm_finops_maturity_chart
+  title: "<Customer Name> FinOps Maturity"
+  scores:
+    visibility:          <1-3>   # # perspectives, cost categories, cloud breadth
+    allocation:          <1-3>   # % allocated spend (Unattributed vs total)
+    commitment_strategy: <1-3>   # CO coverage % + RI utilisation
+    anomaly_detection:   <1-3>   # budgets-with-alerts + anomaly rules active
+    optimization:        <1-3>   # AutoStopping rules + open recommendations
+    accountability:      <1-3>   # chargeback / showback maturity
+    tooling:             <1-3>   # FinOps agent adoption cadence
+  output_path: "/absolute/path/to/<customer>-bvr/assets/maturity_chart.png"
+```
+
+Save the PNG **into the BVR assets directory** so it can be referenced from the markdown as
+`![FinOps Maturity](assets/maturity_chart.png)` and picked up by `harness_ccm_finops_report_render`.
+The tool returns an inline PNG **and** a JSON summary with `overall_score`, `overall_label`, and
+per-group sub-scores (`inform`, `optimize`, `operate`). Quote the `overall_score` in the BVR's
+Executive Summary header.
+
+### Quarterly North Star Goals
+Establish clear, measurable targets for the upcoming quarter. 
+
+* **Savings Target:** Define a specific dollar amount or percentage savings relative to contract value (e.g., "$X saved" or "200% ROI").
+* **AutoStopping Expansion:** Assign at least one new AutoStopping pilot to an uncovered Business Unit.
+* **Commitment Coverage:** Enable Commitment Orchestrator on at least one new service type (e.g., ElastiCache, RDS).
+* **Reporting Evolution:** Complete Cost Categories migration and stand up BU-level self-serve dashboards.
+* **Financial Alignment:** Establish a fiscal year (FY) savings baseline for internal finance reporting.
+
+---
+
+## II. CCM Module Deep Dive & Metric Review
+
+Use the following tables to review active modules, assess performance against benchmarks, and guide the discovery conversation.
+
+---
+
+### 1. Cost Visibility & Allocation (CCM Insights)
+**Focus:** Establishing foundational visibility, budget tracking, and team accountability.
+
+| Metric to Track | Success Benchmark | Current Status |
+| :--- | :--- | :--- |
+| Configured Perspectives / Categories | Categories deployed for each BU | [Insert Data] |
+| Custom BI Dashboards in use | Zero reliance on Excel for reporting | [Insert Data] |
+| Allocated vs. Unallocated Spend | 80%+ of spend allocated to a cost owner | [Insert Data] |
+| Active Budgets / Anomaly Rules | Budgets set at BU/team level with alerts | [Insert Data] |
+
+**Agent Queries to Populate:**
+
+```
+# Perspectives and cost categories
+harness_ccm_finops_list  resource_type: "cost_perspective"
+→ total count = "Configured Perspectives"
+
+harness_ccm_finops_list  resource_type: "cost_category"
+→ list names + bucket counts = "Categories deployed"
+
+# Allocated vs Unallocated — run for each cloud's default perspective
+harness_ccm_finops_list
+  resource_type: "cost_breakdown"
+  perspective_id: "<defaultAwsPerspectiveId or defaultGcpPerspectiveId>"
+  group_by: "cost_category"
+  business_mapping_name: "<BU_MAPPING>"
+  time_filter: "THIS_MONTH"
+→ sum cost of all named buckets = allocated spend
+→ find the "Unattributed" row cost = unallocated spend
+→ allocation % = allocated / (allocated + unallocated) × 100
+→ benchmark met if ≥ 80 %
+
+# Budgets
+harness_ccm_finops_budget_health
+→ summary.over_budget + summary.at_risk + summary.on_track = total active budgets
+→ note any over_budget or at_risk items for the conversation
+```
+
+**Discovery Questions:**
+* Have you migrated from standard Perspectives to Cost Categories to unlock custom dashboards?
+* Can finance and engineering teams access their own dashboards independently?
+* Are you scheduling Dynamic Perspective Reports for automated stakeholder delivery?
+* Do you have non-cloud costs (SaaS, on-prem) to ingest via the FOCUS standard?
+
+---
+
+### 2. Commitment Orchestration
+**Focus:** Maximizing RI/SP coverage and eliminating manual commitment management.
+
+| Metric to Track | Success Benchmark | Current Status |
+| :--- | :--- | :--- |
+| Total Savings Generated | Annualized run-rate clearly documented | [Insert Data] |
+| % Commitments Under Harness | 90%+ commitment coverage | [Insert Data] |
+| Value of Unmanaged Commitments | $0 (Pipeline opportunity identified) | [Insert Data] |
+| EC2 (Compute) — On-Demand % | < 10% on-demand for EC2 | [Insert Data] |
+| RDS — On-Demand % | < 20% on-demand for RDS | [Insert Data] |
+| ElastiCache — On-Demand % | < 20% on-demand for ElastiCache | [Insert Data] |
+| RDS RI Utilization | ≥ 80% (under-utilization = over-purchased RIs) | [Insert Data] |
+
+> **EC2 vs RDS story:** EC2 is typically well-covered via Savings Plans; RDS and ElastiCache
+> are RI-only services that require separate commitment purchases and are frequently uncovered
+> or over-purchased. A low RDS RI utilization rate combined with high on-demand spend signals
+> both a sizing problem and a CO expansion opportunity.
+
+**Agent Queries to Populate:**
+
+```
+# All dates are YYYY-MM-DD strings. Use last 90 days for a stable run-rate.
+
+# ── Step 1: High-level summary ──────────────────────────────────────────────
+harness_ccm_finops_list
+  resource_type: "cost_commitment_summary"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+→ savings.total                       = "Total Savings Generated (90-day)"
+→ annualized run-rate                 = savings.total × (365 / 90)
+→ coverage.savings_plan_pct           = SP coverage %
+→ coverage.reserved_instances_pct     = RI coverage %
+→ coverage.ondemand_pct               = residual on-demand % (lower = better)
+→ utilization.reserved_instances_pct  (benchmark ≥ 80%)
+→ utilization.savings_plan_pct        (benchmark ≥ 95%)
+
+# ── Step 2: Managed vs unmanaged split ─────────────────────────────────────
+harness_ccm_finops_list
+  resource_type: "cost_commitment_savings_overview"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+→ managed_savings_total    = savings Harness is orchestrating
+→ unmanaged_savings_total  = "Value of Unmanaged Commitments" (target = $0)
+→ % under Harness          = managed_savings_total / overall_savings × 100
+→ benchmark met if ≥ 90%
+
+# ── Step 3: Per-service savings — EC2 vs RDS vs ElastiCache ─────────────────
+# Run once per service to compare coverage. Expect EC2 to be highest;
+# RDS and ElastiCache near-zero savings = uncovered = expansion opportunity.
+
+harness_ccm_finops_list
+  resource_type: "cost_commitment_savings_overview"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+  service: "Amazon Elastic Compute Cloud - Compute"
+→ overall_savings, managed_savings_total, unmanaged_savings_total (EC2 baseline)
+
+harness_ccm_finops_list
+  resource_type: "cost_commitment_savings_overview"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+  service: "Amazon Relational Database Service"
+→ overall_savings ≈ 0 → RDS has no active RI coverage (expansion target)
+→ unmanaged_savings_total > 0 → RDS RIs exist but not under Harness
+
+harness_ccm_finops_list
+  resource_type: "cost_commitment_savings_overview"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+  service: "Amazon ElastiCache"
+→ same pattern as RDS — near-zero = uncovered
+
+# ── Step 4: Per-service spend breakdown (On-Demand vs RI vs SP) ─────────────
+# cost_commitment_analysis gives the daily spend split and trend.
+# Run this for each service to quantify the on-demand exposure.
+
+harness_ccm_finops_list
+  resource_type: "cost_commitment_analysis"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+  service: "Amazon Relational Database Service"
+  net_amortized: true
+→ commitment_types."On-Demand".total_spend  = raw on-demand RDS cost (the gap)
+→ commitment_types."Reserved Instances".total_spend = existing RI coverage
+→ commitment_types."On-Demand".trend_pct    = growing on-demand = urgent
+→ chart the daily series to show whether on-demand is shrinking or growing
+
+harness_ccm_finops_list
+  resource_type: "cost_commitment_analysis"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+  service: "Amazon Elastic Compute Cloud - Compute"
+  net_amortized: true
+→ EC2 benchmark: On-Demand should be < 10% of total_spend
+
+# ── Step 5: RI utilization — are existing RDS RIs being wasted? ─────────────
+harness_ccm_finops_list
+  resource_type: "cost_commitment_utilisation"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+→ commitment_types."Reserved Instances".utilization_pct
+  - ≥ 80%  → healthy
+  - 60–80% → over-purchased, some waste
+  - < 60%  → significant RI waste — recommend right-sizing before expanding
+→ commitment_types."Reserved Instances".trend_pct
+  - negative trend = utilization falling = workload was scaled down
+
+# (No per-service filter on utilisation endpoint — use the overall RI row
+#  and cross-reference with savings_overview per service to isolate RDS.)
+
+# ── Step 6: Which payer accounts have CO enabled? ───────────────────────────
+harness_ccm_finops_list  resource_type: "cost_commitment_accounts"
+→ accounts where co_enabled: false = accounts where RDS/ElastiCache RIs
+  are being purchased manually with no Harness orchestration
+```
+
+**How to frame the EC2 vs RDS gap in the BVR:**
+1. Show EC2 on-demand % (usually low — Savings Plans are working)
+2. Show RDS on-demand % (usually high — no RI orchestration)
+3. Calculate: `RDS on-demand spend × ~40% RI discount rate = annual savings opportunity`
+4. If RDS RI utilization < 80%, flag both the waste *and* the coverage gap before recommending new purchases
+
+**Discovery Questions:**
+* What percentage of your cloud commitments are currently managed under Harness?
+* How much unmanaged commitment spend exists outside Harness today?
+* Are ElastiCache and RDS service types covered by your current commitment strategy?
+* What is your current RDS RI utilization rate — are existing RIs being fully consumed?
+* Are RDS and ElastiCache RIs purchased manually today, or through an automated process?
+
+---
+
+### 3. AutoStopping
+**Focus:** Eradicating idle non-prod spend via dynamic, proxy-based, or time-based rules.
+
+| Metric to Track | Success Benchmark | Current Status |
+| :--- | :--- | :--- |
+| Total Savings Generated | $10K+/month per 100 active rules | [Insert Data] |
+| Active Rules | Expansion across all non-prod BUs | [Insert Data] |
+| Non-Prod Environment Coverage | 100% of applicable non-prod footprint | [Insert Data] |
+
+**Agent Queries to Populate:**
+
+```
+# Cumulative savings — from_date / to_date are YYYY-MM-DD strings
+harness_ccm_finops_list
+  resource_type: "cost_autostopping_savings_cumulative"
+  from_date: "<YYYY-MM-DD 30 days ago>"
+  to_date: "<YYYY-MM-DD today>"
+→ total_savings          = "Total Savings Generated (last 30 days)"
+→ total_active_services  = active rule count (cross-check with rule list)
+→ savings_percent        = savings as % of potential cost
+→ k8s_savings.total_savings = K8s-specific savings sub-total
+→ monthly run-rate: total_savings covers the window — divide by window days × 30 if needed
+
+# Filter by cloud provider if needed (aws | gcp | azure, comma-separated)
+harness_ccm_finops_list
+  resource_type: "cost_autostopping_savings_cumulative"
+  from_date: "<YYYY-MM-DD>"
+  to_date: "<YYYY-MM-DD>"
+  filter_cloud_provider: "aws"
+→ AWS-only savings for per-cloud breakdown
+
+# Rule inventory
+harness_ccm_finops_list  resource_type: "cost_autostopping_rule"
+→ count items where disabled = false   = "Active Rules"
+→ count items where disabled = true    = "Disabled/paused rules"
+→ items with errors ≠ null             = rules needing attention
+→ group by cloud_provider to see AWS / GCP / Azure split
+→ review rule names/host_name for "prod" — prod rules are a risk signal
+→ identify BUs or regions with no rules → uncovered non-prod footprint
+
+# Per-rule savings for top savers — epoch seconds (different from cumulative)
+harness_ccm_finops_get
+  resource_type: "cost_autostopping_savings"
+  resource_id: "<rule_id_from_list>"
+  from_date: <epoch_sec_30_days_ago>
+  to_date: <epoch_sec_now>
+→ validates which rules are generating the most savings
+```
+
+**Discovery Questions:**
+* What is your current monthly savings run-rate from AutoStopping?
+* Which business units or environments are still uncovered?
+* What is blocking expansion (e.g., proxy complexity, stakeholder resistance)?
+
+---
+
+### 4. Cluster Orchestrator
+**Focus:** Real-time Kubernetes optimization via Spot Orchestration, Bin Packing, and VPA.
+
+| Metric to Track | Success Benchmark | Current Status |
+| :--- | :--- | :--- |
+| EKS Compute on Spot Instances | 70–90% running on Spot | [Insert Data] |
+| Manual Interruption Handling | Zero manual interventions required | [Insert Data] |
+| Bin Packing / VPA Status | Bin Packing enabled; VPA generating insights | [Insert Data] |
+
+**Agent Queries to Populate:**
+
+> **Note:** Cluster Orchestrator spot %, bin packing, and VPA metrics live in the Harness platform
+> UI (CCO module) and are not yet exposed via the FinOps MCP. Use the agent for the cost-side
+> context below; pull spot/VPA metrics from the CCO dashboard directly.
+
+```
+# Confirm K8s data is present and locate the cluster perspective
+harness_ccm_finops_list  resource_type: "cost_metadata"
+→ k8sClusterConnectorPresent: true/false
+→ clusterDataPresent: true/false
+→ defaultClusterPerspectiveId → use in queries below
+
+# Total cluster spend this month (baseline for ROI conversation)
+harness_ccm_finops_list
+  resource_type: "cost_summary"
+  perspective_id: "<defaultClusterPerspectiveId>"
+  time_filter: "THIS_MONTH"
+→ cost.statsValue   = current month cluster spend
+→ cost.statsTrend   = MoM growth % (high growth = urgent CCO opportunity)
+
+# Cluster spend trend — is it growing?
+harness_ccm_finops_list
+  resource_type: "cost_timeseries"
+  perspective_id: "<defaultClusterPerspectiveId>"
+  group_by: "cloudProvider"
+  time_filter: "LAST_3_MONTHS"
+  time_resolution: "MONTH"
+→ rising trend without CCO active = quantified optimization gap
+
+# Cost breakdown by namespace (identify biggest workloads)
+harness_ccm_finops_list
+  resource_type: "cost_breakdown"
+  perspective_id: "<defaultClusterPerspectiveId>"
+  group_by: "product"
+  time_filter: "THIS_MONTH"
+→ top-spending namespaces / workloads = CCO pilot candidates
+```
+
+**Discovery Questions:**
+* What percentage of your EKS compute is currently running on spot instances vs. on-demand?
+* Have you enabled Bin Packing to capture scale-down savings?
+* Are you using Cluster Capacity Limits to prevent uncontrolled scaling events?
+
+---
+
+### 5. Asset Governance & Recommendations
+**Focus:** Enforcing policy-as-code, improving tag quality, and actioning optimization signals.
+
+| Metric to Track | Success Benchmark | Current Status |
+| :--- | :--- | :--- |
+| Active Governance Rules | At least 10 active rules covering primary clouds | [Insert Data] |
+| Recommendation Action Rate | >50% of surfaced recommendations actioned | [Insert Data] |
+| Custom Cloud Custodian Policies | Custom rules utilized over strictly OOTB | [Insert Data] |
+
+**Agent Queries to Populate:**
+
+```
+# All open recommendations — total count + total monthly savings at stake
+harness_ccm_finops_list
+  resource_type: "cost_recommendation"
+  recommendation_state: "OPEN"
+  limit: 100
+→ total count of items       = open recommendation backlog
+→ sum monthlySaving          = total $ at stake (monthly)
+→ annualized: × 12           = savings opportunity for exec summary
+
+# Governance-specific rules (Cloud Custodian policies)
+harness_ccm_finops_list
+  resource_type: "cost_recommendation"
+  resource_type_filter: "GOVERNANCE"
+  recommendation_state: "OPEN"
+  limit: 50
+→ count distinct governance_rule_name values = "Active Governance Rules"
+→ rules with monthlySaving > 0 = rules with enforcement potential
+
+# Right-sizing recommendations (EC2/Azure VMs)
+harness_ccm_finops_list
+  resource_type: "cost_recommendation"
+  resource_type_filter: "EC2_INSTANCE"
+  recommendation_state: "OPEN"
+  limit: 50
+→ total monthlySaving sum = EC2 right-sizing opportunity
+
+# Kubernetes workload recommendations
+harness_ccm_finops_list
+  resource_type: "cost_recommendation"
+  resource_type_filter: "WORKLOAD"
+  recommendation_state: "OPEN"
+  limit: 50
+→ total monthlySaving sum = K8s workload right-sizing opportunity
+
+# BU-scoped recommendations (repeat per BU to show per-team accountability)
+harness_ccm_finops_list
+  resource_type: "cost_recommendation"
+  cost_category_name: "<BU_MAPPING>"
+  cost_category_bucket: "<BU_NAME>"
+  recommendation_state: "OPEN"
+  limit: 30
+→ per-BU savings opportunity — use in accountability conversations
+
+# Anomaly check (governance signal)
+harness_ccm_finops_list
+  resource_type: "cost_anomaly_summary"
+  perspective_id: "<defaultAwsPerspectiveId or defaultGcpPerspectiveId>"
+  time_filter: "LAST_7"
+→ anomalyCount + differenceFromExpectedCost = active governance gaps
+```
+
+**Discovery Questions:**
+* What percentage of recommendations are actionable versus noise for your environment?
+* Are any governance rules running in enforcement mode (auto-stop/tag/delete)?
+* Are you integrating findings directly with Jira or ServiceNow for remediation tracking?
+
+---
+
+### 6. FinOps Agent
+**Focus:** Accelerating insights via AI-driven conversational cost analysis and anomaly triage.
+
+| Metric to Track | Success Benchmark | Current Status |
+| :--- | :--- | :--- |
+| Active Users / Sessions | At least one agent-assisted review per week | [Insert Data] |
+| Actioning Rate Improvement | Increased action rate post-agent adoption | [Insert Data] |
+| Manual Workflow Replacement | Replaced at least one recurring manual report | [Insert Data] |
+
+> **Note:** Agent session/user metrics are captured in Harness platform audit logs and the UI
+> usage dashboard — not exposed via MCP. Populate these from the Harness admin UI. The queries
+> below demonstrate *what the agent can answer* to build the business case for adoption.
+
+**Agent Queries to Demonstrate Value (run live during the BVR):**
+
+```
+# Live demo 1 — "What are our top cost drivers this month?"
+harness_ccm_finops_list
+  resource_type: "cost_breakdown"
+  perspective_id: "<primary perspective>"
+  group_by: "cost_category"
+  business_mapping_name: "<BU_MAPPING>"
+  time_filter: "THIS_MONTH"
+→ instant BU-level leaderboard with MoM trends (costTrend)
+
+# Live demo 2 — "Are any budgets at risk?"
+harness_ccm_finops_budget_health
+→ classified over_budget / at_risk / on_track in one call
+
+# Live demo 3 — "What anomalies fired this week?"
+harness_ccm_finops_list
+  resource_type: "cost_anomaly_summary"
+  perspective_id: "<primary perspective>"
+  time_filter: "LAST_7"
+→ anomaly timeline + dollar impact, no dashboard navigation needed
+
+# Live demo 4 — "What's our top savings opportunity right now?"
+harness_ccm_finops_list
+  resource_type: "cost_recommendation"
+  recommendation_state: "OPEN"
+  limit: 10
+→ ranked recommendations by monthlySaving
+```
+
+**Discovery Questions:**
+* Are your teams using the agent for proactive cost analysis or reactive anomaly triage?
+* Are you getting the insights you need in plain language without manual dashboard navigation?
+* Are you aware of the MCP integration to connect internal AI tools directly to CCM data?
+
+---
+
+### 7. Savings Accounting & Forecasting
+**Focus:** Proving ROI to finance through accurate forecasting and baseline reductions.
+
+| Metric to Track | Success Benchmark | Current Status |
+| :--- | :--- | :--- |
+| Tracked Savings Format | Both point-in-time and carry-forward tracked | [Insert Data] |
+| FY Forecast Alignment | Savings factored into fiscal year baselines | [Insert Data] |
+
+**Agent Queries to Populate:**
+
+```
+# ── Total platform savings (last 30 days) ──────────────────────────────────
+
+# AutoStopping (last 30 days) — from_date / to_date are YYYY-MM-DD strings
+harness_ccm_finops_list
+  resource_type: "cost_autostopping_savings_cumulative"
+  from_date: "<YYYY-MM-DD 30 days ago>"
+  to_date: "<YYYY-MM-DD today>"
+→ total_savings  (A)
+
+# Commitment Orchestration (last 90 days ÷ 3 for monthly rate)
+harness_ccm_finops_list
+  resource_type: "cost_commitment_savings_overview"
+  start_date: "<90-days-ago>"
+  end_date: "<today>"
+→ managed_savings_total  → monthly rate = managed_savings_total / 3  (B)
+
+# Total monthly savings run-rate = A + B
+# Annualized = (A + B) × 12
+# ROI = annualized savings / contract value × 100
+
+# ── Budget vs actuals (FY alignment) ───────────────────────────────────────
+
+harness_ccm_finops_budget_health
+  period: "MONTHLY"
+→ over_budget list   = already exceeded — immediate action required
+→ at_risk list       = forecast to exceed — risk to FY baseline
+→ on_track list + pct_forecast  = where headroom remains
+
+# Month-by-month actuals vs budgeted for a specific perspective
+harness_ccm_finops_get
+  resource_type: "cost_budget"
+  resource_id: "<budget_id_from_health_sweep>"
+→ costData[]: actualCost vs budgeted per month
+→ budgetVariancePercentage: trend toward/away from FY target
+→ forecastCost: projected end-of-period spend for executive reporting
+
+# ── Spend trend — baseline for FY forecast ─────────────────────────────────
+
+harness_ccm_finops_list
+  resource_type: "cost_timeseries"
+  perspective_id: "<primary perspective>"
+  group_by: "cost_category"
+  business_mapping_name: "<BU_MAPPING>"
+  time_filter: "LAST_12_MONTHS"
+  time_resolution: "MONTH"
+→ 12-month BU-level trend series
+→ extrapolate forward to FY end for finance baseline conversation
+```
+
+**Discovery Questions:**
+* Does your organization track savings on a point-in-time or carry-forward basis?
+* Are you including Harness-driven savings in your FY forecast as new baseline reductions?
+* Do you need a contract burn-down view to track spend against your Harness CCM commitment?
+
+---
+
+## III. Expansion Signals & Action Plan
+
+Monitor the following customer indicators to identify immediate upsell or feature expansion opportunities during the review.
+
+| Customer Signal | Recommended Action / Upsell Path |
+| :--- | :--- |
+| Using Excel for cost-per-product reporting | **Action:** Pitch Cost Categories + Custom BI Dashboards. |
+| Commitment coverage is below 90% | **Action:** Expand Commitment Orchestrator footprint. |
+| No ElastiCache or RDS coverage | **Action:** Quantify RDS/ElastiCache on-demand spend via `cost_commitment_analysis` per service, then multiply by ~40% RI discount rate to show the savings opportunity. |
+| AutoStopping deployed in only 1-2 BUs | **Action:** Initiate multi-BU expansion and pilot new environments. |
+| Using Insights only, but has active K8s spend | **Action:** Pitch Cluster Orchestrator for EKS spot orchestration. |
+| Unaware of FinOps Agent or AI features | **Action:** Schedule a dedicated FinOps Agent and MCP feature walkthrough. |
+| Poor tagging coverage in Perspectives | **Action:** Deploy Asset Governance rules for auto-tagging enforcement. |
+| Recommendations ignored or low action rate | **Action:** Introduce Custom Cloud Custodian policies and FinOps Agent triage. |
+
+**Agent Queries to Surface Expansion Signals:**
+
+```
+# Signal: allocation < 80 % → Cost Categories upsell
+harness_ccm_finops_list
+  resource_type: "cost_breakdown"
+  perspective_id: "<default perspective>"
+  group_by: "cost_category"
+  business_mapping_name: "<BU_MAPPING>"
+  time_filter: "THIS_MONTH"
+→ "Unattributed" cost / total > 20 % = signal
+
+# Signal: commitment coverage < 90 % → CO expansion
+harness_ccm_finops_list
+  resource_type: "cost_commitment_summary"
+  start_date: "<30-days-ago>"  end_date: "<today>"
+→ coverage.ondemand_pct > 10 % = signal
+
+# Signal: RDS/ElastiCache on-demand exposure (most common gap)
+harness_ccm_finops_list
+  resource_type: "cost_commitment_analysis"
+  start_date: "<30-days-ago>"  end_date: "<today>"
+  service: "Amazon Relational Database Service"
+  net_amortized: true
+→ commitment_types."On-Demand".total_spend > $0 = RDS coverage gap
+→ multiply by 40% ≈ annual savings opportunity from adding RDS RIs
+
+harness_ccm_finops_list
+  resource_type: "cost_commitment_analysis"
+  start_date: "<30-days-ago>"  end_date: "<today>"
+  service: "Amazon ElastiCache"
+  net_amortized: true
+→ same check for ElastiCache
+
+# Signal: unmanaged commitments > $0 → CO upsell
+harness_ccm_finops_list
+  resource_type: "cost_commitment_savings_overview"
+  start_date: "<30-days-ago>"  end_date: "<today>"
+→ unmanaged_savings_total > 0 = signal
+
+# Signal: AutoStopping in few BUs → expansion pilot
+harness_ccm_finops_list  resource_type: "cost_autostopping_rule"
+→ cluster rules by cloud_account_id or name patterns
+→ few distinct accounts = limited BU coverage = signal
+
+# Signal: K8s spend but no CO
+harness_ccm_finops_list  resource_type: "cost_metadata"
+→ k8sClusterConnectorPresent: true + clusterDataPresent: true
+→ then: large cluster spend with no CCO metrics = signal
+
+# Signal: large open recommendation backlog → governance triage
+harness_ccm_finops_list
+  resource_type: "cost_recommendation"
+  recommendation_state: "OPEN"
+  limit: 1
+→ high monthlySaving on first result = high-value ignored backlog = signal
+```
 
 ---
