@@ -19,7 +19,9 @@ export function registerListTool(server: McpServer, registry: Registry, client: 
     "harness_ccm_finops_list",
     {
       description: "List CCM FinOps resources with filtering and pagination. Accepts a Harness URL to auto-extract scope.",
-      inputSchema: {
+      // passthrough() preserves any extra top-level keys (e.g. perspective_id, group_by, time_filter)
+      // that the agent may pass alongside the known schema fields, so they reach the registry dispatcher.
+      inputSchema: z.object({
         resource_type: z.string().describe("CCM resource type (e.g. cost_perspective, cost_breakdown, cost_budget). Auto-detected from url.").optional(),
         url: z.string().describe("Harness UI URL — auto-extracts org, project, and type").optional(),
         org_id: z.string().describe("Organization identifier (overrides default)").optional(),
@@ -29,7 +31,7 @@ export function registerListTool(server: McpServer, registry: Registry, client: 
         search_term: z.string().describe("Filter results by name or keyword").optional(),
         compact: z.boolean().describe("Strip verbose metadata from list items, keeping only essential fields (default true)").default(true).optional(),
         filters: z.record(z.string(), z.unknown()).describe(filtersDesc).optional(),
-      },
+      }).passthrough(),
       annotations: {
         title: "List CCM FinOps Resources",
         readOnlyHint: true,

@@ -479,3 +479,196 @@ export const ccmCommitmentSavingsOverviewExtract = (raw: unknown): unknown => {
     },
   };
 };
+
+// ---------------------------------------------------------------------------
+// AutoStopping extractors
+// ---------------------------------------------------------------------------
+
+function compactAutoStoppingRule(rule: Record<string, unknown>): Record<string, unknown> {
+  const metadata = rule.metadata as Record<string, unknown> | undefined;
+  const cloudProvider = metadata?.cloud_provider_details as Record<string, unknown> | undefined;
+  const instanceFilters = metadata?.instance_filters as Record<string, unknown> | undefined;
+  const routing = rule.routing as Record<string, unknown> | undefined;
+  const instance = routing?.instance as Record<string, unknown> | undefined;
+  const filter = instance?.filter as Record<string, unknown> | undefined;
+
+  const ids = (instanceFilters?.ids ?? filter?.ids ?? []) as string[];
+  const regions = (instanceFilters?.regions ?? filter?.regions ?? []) as string[];
+
+  const errors = metadata?.service_errors as Array<Record<string, unknown>> | undefined;
+  const uniqueErrors: Array<{ action: string; error: string }> = [];
+  if (Array.isArray(errors)) {
+    const seen = new Set<string>();
+    for (const e of errors) {
+      const key = `${e.action}::${e.error}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueErrors.push({ action: String(e.action ?? ""), error: String(e.error ?? "") });
+      }
+    }
+  }
+
+  return {
+    id: rule.id,
+    name: rule.name,
+    kind: rule.kind,
+    fulfilment: rule.fulfilment,
+    cloud_account_id: rule.cloud_account_id,
+    cloud_provider: cloudProvider?.name ?? null,
+    idle_time_mins: rule.idle_time_mins,
+    status: rule.status,
+    disabled: rule.disabled,
+    host_name: rule.host_name,
+    instance_ids: ids,
+    regions,
+    errors: uniqueErrors.length > 0 ? uniqueErrors : null,
+    created_at: rule.created_at,
+    updated_at: rule.updated_at,
+  };
+}
+
+/**
+ * AutoStopping rule list — strip verbose metadata, deduplicate errors.
+ */
+export const ccmAutoStoppingListExtract = (raw: unknown): { items: unknown[]; total: number } => {
+  const resp = unwrapLw(raw) as Record<string, unknown>;
+  const records = Array.isArray(resp.records) ? resp.records as Array<Record<string, unknown>> : [];
+  const total = typeof resp.total === "number" ? resp.total : records.length;
+
+  const items = records.map((r) => compactAutoStoppingRule(r));
+  return { items, total };
+};
+
+/**
+ * AutoStopping rule detail — same compact shape, unwraps response.service.
+ */
+export const ccmAutoStoppingDetailExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, unknown>;
+  const service = (resp.service ?? resp) as Record<string, unknown>;
+  if (!service.id) return resp;
+  return compactAutoStoppingRule(service);
+};
+
+/**
+ * AutoStopping cumulative savings — flatten into summary + daily chart.
+ */
+export const ccmAutoStoppingCumulativeSavingsExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw) as Record<string, unknown>;
+  const days = Array.isArray(resp.days) ? resp.days as string[] : [];
+  const potential = Array.isArray(resp.potential_cost) ? resp.potential_cost as number[] : [];
+  const actual = Array.isArray(resp.actual_cost) ? resp.actual_cost as number[] : [];
+  const savings = Array.isArray(resp.savings) ? resp.savings as number[] : [];
+
+  const chart = days.map((date, i) => ({
+    date,
+    potential_cost: potential[i] ?? 0,
+    actual_cost: actual[i] ?? 0,
+    savings: savings[i] ?? 0,
+  }));
+
+  // k8s_savings is a sub-breakdown returned by the POST API
+  const k8s = resp.k8s_savings as Record<string, unknown> | undefined;
+
+  return {
+    total_potential: resp.total_potential,
+    total_cost: resp.total_cost,
+    total_savings: resp.total_savings,
+    savings_percent: resp.savings_percent,
+    total_active_services: resp.total_active_services,
+    k8s_savings: k8s ? {
+      total_savings: k8s.savings ?? 0,
+      total_cost: k8s.cost ?? 0,
+      total_potential: k8s.potential ?? 0,
+      savings_percent: k8s.percent ?? 0,
+    } : null,
+    chart,
+  };
+};
+
+/**
+ * AutoStopping per-rule savings — daily breakdown already clean, just unwrap.
+ */
+export const ccmAutoStoppingRuleSavingsExtract = (raw: unknown): unknown => {
+  const resp = unwrapLw(raw);
+  if (!Array.isArray(resp)) return resp;
+
+  const items = (resp as Array<Record<string, unknown>>).map((d) => ({
+    date: d.usage_date,
+    potential_cost: d.potential_cost,
+    actual_cost: d.actual_cost,
+    savings: d.actual_savings,
+    savings_pct: d.savings_percentage,
+    idle_hours: d.idle_hours,
+    actual_hours: d.actual_hours,
+  }));
+
+  const totals = items.reduce(
+    (acc, d) => {
+      acc.potential += (d.potential_cost as number) ?? 0;
+      acc.actual += (d.actual_cost as number) ?? 0;
+      acc.savings += (d.savings as number) ?? 0;
+      return acc;
+    },
+    { potential: 0, actual: 0, savings: 0 },
+  );
+
+  return {
+    total_potential: totals.potential,
+    total_actual: totals.actual,
+    total_savings: totals.savings,
+    savings_pct: totals.potential > 0 ? (totals.savings / totals.potential) * 100 : 0,
+    chart: items,
+  };
+};
+
+/**
+ * AutoStopping rule logs — unwrap paginated logs.
+ */
+export const ccmAutoStoppingLogsExtract = (raw: unknown): { items: unknown[]; total: number } => {
+  const resp = unwrapLw(raw) as Record<string, unknown>;
+  const logs = Array.isArray(resp.logs) ? resp.logs as Array<Record<string, unknown>> : [];
+  const total = typeof resp.total === "number" ? resp.total : logs.length;
+
+  const items = logs.map((log) => ({
+    id: log.id,
+    state: log.state,
+    message: log.message,
+    error: log.error || null,
+    created_at: log.created_at,
+  }));
+
+  return { items, total };
+};
+
+/**
+ * AutoStopping schedules — unwrap bare array response.
+ */
+export const ccmAutoStoppingSchedulesExtract = (raw: unknown): { items: unknown[]; total: number } => {
+  const resp = unwrapLw(raw);
+  const schedules = Array.isArray(resp) ? resp as Array<Record<string, unknown>> : [];
+
+  const items = schedules.map((s) => {
+    const details = s.details as Record<string, unknown> | undefined;
+    const downtime = details?.downtime as Record<string, unknown> | undefined;
+    const uptime = details?.uptime as Record<string, unknown> | undefined;
+    const period = (downtime?.period ?? uptime?.period) as Record<string, unknown> | undefined;
+    const daySpec = (downtime?.days ?? uptime?.days) as Record<string, unknown> | undefined;
+
+    return {
+      id: s.id,
+      name: s.name,
+      type: downtime ? "downtime" : uptime ? "uptime" : "unknown",
+      timezone: details?.timezone ?? null,
+      period_start: period?.start ?? null,
+      period_end: period?.end ?? null,
+      days_of_week: daySpec?.days ?? null,
+      all_day: daySpec?.all_day ?? false,
+      start_time: daySpec?.start_time ?? null,
+      end_time: daySpec?.end_time ?? null,
+      priority: s.priority,
+      created_at: s.created_at,
+    };
+  });
+
+  return { items, total: items.length };
+};

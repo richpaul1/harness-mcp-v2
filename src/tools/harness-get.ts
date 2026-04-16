@@ -12,14 +12,15 @@ export function registerGetTool(server: McpServer, registry: Registry, client: H
     "harness_ccm_finops_get",
     {
       description: "Get a CCM FinOps resource by ID. Accepts a Harness URL to auto-extract identifiers.",
-      inputSchema: {
+      // passthrough() preserves any extra top-level keys the agent passes alongside known fields.
+      inputSchema: z.object({
         resource_type: z.string().describe("CCM resource type (e.g. cost_perspective, cost_budget, cost_recommendation). Auto-detected from url.").optional(),
         resource_id: z.string().describe("Primary resource identifier. Auto-detected from url.").optional(),
         url: z.string().describe("Harness UI URL — auto-extracts org, project, type, and ID").optional(),
         org_id: z.string().describe("Organization identifier (overrides default)").optional(),
         project_id: z.string().describe("Project identifier (overrides default)").optional(),
         params: z.record(z.string(), z.unknown()).describe("Additional identifiers for nested resources. Call harness_ccm_finops_describe for fields per resource_type.").optional(),
-      },
+      }).passthrough(),
       annotations: {
         title: "Get CCM FinOps Resource",
         readOnlyHint: true,

@@ -34,6 +34,22 @@ Use this to:
 
 ## 2. Resolve perspective, then query
 
+### Calling convention — where to put parameters
+
+All resource-specific parameters (`perspective_id`, `group_by`, `time_filter`, `filter_*`, `business_mapping_name`, `limit`, etc.) are passed **directly at the top level** of the tool call — not nested under a `filters` key. The examples throughout this document all use top-level style:
+
+```json
+{
+  "resource_type": "cost_breakdown",
+  "perspective_id": "<id>",
+  "group_by": "awsServicecode",
+  "time_filter": "LAST_30_DAYS",
+  "filter_aws_line_item_type": "Usage"
+}
+```
+
+A `filters: { … }` wrapper is also accepted (treated as an alias) but top-level is preferred and simpler. **Never omit `perspective_id` — without it the query returns empty results.**
+
 1. **List all perspectives** (including custom ones): **`harness_ccm_finops_list`** `resource_type: "cost_perspective"`. Search by name with `search_term`. Returns `id`, `name`, `viewType`, `dataSources`, etc.
 2. **Quick default perspective IDs:** Use `cost_metadata` (section 1) or **`harness_ccm_finops_list`** `resource_type: "cost_summary"` with **no** `perspective_id`.
 3. Build queries with: `perspective_id`, `time_filter` (or `start_time_ms`/`end_time_ms`), **`group_by`** for rollups.
@@ -305,7 +321,9 @@ Use this when the user asks about **recommendations**, **savings opportunities**
 
 ### Step 1 — List recommendations (`harness_ccm_finops_list` → `cost_recommendation`)
 
-Find recommendations, optionally scoped by perspective, cost category, cloud provider, or resource type:
+Find recommendations, optionally scoped by perspective, cost category, cloud provider, or resource type.
+
+> **Note:** All parameters below can be passed at the top level (preferred) or inside a `filters: {}` wrapper — both are equivalent. Examples here show the `filters` style; top-level works identically (e.g. `"recommendation_state": "OPEN"` alongside `"resource_type"`).
 
 ```json
 {
@@ -800,7 +818,49 @@ Step 4 — Chart the comparison
 
 ---
 
-## 15. Example prompts — getting started
+## 15. AutoStopping Rules (Idle Resource Management)
+
+AutoStopping automatically shuts down idle cloud resources (VMs, ECS, RDS, Kubernetes workloads) and brings them back on demand, saving cost on non-production environments.
+
+### Resource types
+
+| Resource type | Returns | Operation |
+|---|---|---|
+| `cost_autostopping_rule` | Rule list with status, cloud provider, idle config | `list` |
+| `cost_autostopping_rule` | Single rule detail | `get` (resource_id = rule numeric ID) |
+| `cost_autostopping_savings` | Daily savings for one rule | `get` (resource_id = rule ID) |
+| `cost_autostopping_savings_cumulative` | Aggregate savings across all rules | `list` |
+| `cost_autostopping_logs` | Activity logs (state transitions) for one rule | `get` (resource_id = rule ID) |
+| `cost_autostopping_schedule` | All uptime/downtime schedules | `list` |
+
+### Key filters
+
+- **`cost_autostopping_rule` list**: `search_term` for name-based filtering
+- **`cost_autostopping_savings_cumulative`**: `from_date` / `to_date` as **YYYY-MM-DD strings** (e.g. `2026-04-01`); optional `filter_cloud_provider` (comma-separated: `aws`, `gcp`, `azure`)
+- **`cost_autostopping_savings` (per-rule)**: `from_date` / `to_date` as Unix epoch seconds (pass via filters)
+- **Logs**: `page` / `size` for pagination
+
+### Workflow: AutoStopping health check
+
+1. **List all rules** → `harness_ccm_finops_list` with `resource_type: cost_autostopping_rule`
+2. **Check cumulative savings** → `harness_ccm_finops_list` with `resource_type: cost_autostopping_savings_cumulative`, `from_date: "YYYY-MM-DD"`, `to_date: "YYYY-MM-DD"`. Optionally add `filter_cloud_provider: "aws"` to scope by cloud.
+3. **Drill into top savers** → `harness_ccm_finops_get` with `resource_type: cost_autostopping_savings`, `resource_id: <rule_id>` for daily breakdown
+4. **Check for errors** → look at `errors` field in rule list; investigate with `harness_ccm_finops_get` on `cost_autostopping_logs`
+5. **Review schedules** → `harness_ccm_finops_list` with `resource_type: cost_autostopping_schedule` to see uptime/downtime windows
+
+### Key points
+
+- **Rule `status`**: `"created"` = active, `"disabled"` = paused. The `disabled` boolean is the canonical check.
+- **`fulfilment`** field: `"ondemand"` (EC2/VM), `"spot"` (spot instances), or specific to the resource type.
+- **Cumulative savings** gives the big picture; per-rule savings lets you find underperforming rules or validate savings claims.
+- **Cumulative savings response** includes `k8s_savings` (K8s-specific sub-total) and `chart` (daily series). `total_active_services` = rule count with activity in the window.
+- **Logs** show state changes: `cooling_down → stopped → active`. If a rule frequently cycles, the idle_time_mins may be too low.
+- **Schedules** are account-level; multiple rules can share the same schedule. Types are `uptime` (force on) or `downtime` (force off).
+- **Date formats differ by endpoint**: cumulative savings uses YYYY-MM-DD strings; per-rule savings uses Unix epoch seconds.
+
+---
+
+## 16. Example prompts — getting started
 
 Use these verbatim or adapt them. They cover the most common FinOps workflows and are a good starting point for new users.
 
@@ -865,6 +925,18 @@ The agent will return the exact mapping names (e.g. "Business Units", "Business 
 
 > "Which AWS payer accounts have Commitment Orchestration enabled?"
 
+### AutoStopping
+
+> "List all AutoStopping rules and their current status."
+
+> "How much has AutoStopping saved in the last 30 days across all rules?"
+
+> "Show me daily savings for AutoStopping rule 12345 over the past week."
+
+> "Are there any AutoStopping rules with errors?"
+
+> "What uptime/downtime schedules are configured?"
+
 ### Reports
 
 > "Which [your cost category mapping] budgets are at risk of overspending this month, and what is driving the variance?"
@@ -872,5 +944,121 @@ The agent will return the exact mapping names (e.g. "Business Units", "Business 
 > "Generate a monthly FinOps report across all [your cost category mapping] covering budget status, active anomalies, and top savings opportunities."
 
 > "Our [your perspective] budget is tracking over — walk me through what's driving the overrun and what we can do about it."
+
+### Maturity
+
+> "Assess our FinOps maturity and render the spider chart."
+
+> "Score our FinOps maturity across all seven dimensions and produce the Crawl/Walk/Run chart."
+
+---
+
+## 17. FinOps Maturity Chart — `harness_ccm_finops_maturity_chart`
+
+Use this tool whenever the user asks for a **FinOps maturity assessment**, **Crawl/Walk/Run score**, **maturity spider chart**, or **maturity radar**.
+
+### Tool call
+
+```json
+{
+  "tool": "harness_ccm_finops_maturity_chart",
+  "scores": {
+    "visibility":          2.5,
+    "allocation":          1.5,
+    "commitment_strategy": 2.0,
+    "anomaly_detection":   1.5,
+    "optimization":        2.0,
+    "accountability":      1.5,
+    "tooling":             1.0
+  },
+  "title": "Acme Corp FinOps Maturity",
+  "output_path": "/absolute/path/to/maturity.png"
+}
+```
+
+- **Scores**: 1 = Crawl, 2 = Walk, 3 = Run. Fractions are supported (e.g. 1.5, 2.3).
+- **title**: customer/account name — appears in chart header.
+- **output_path**: absolute path to save PNG; omit to return inline only.
+
+Returns: inline PNG + JSON summary (`overall_score`, `overall_label`, `groups`, `dimensions`).
+
+### Group mapping
+
+| Dimension | Group | Color |
+|---|---|---|
+| `visibility` | Inform | Orange |
+| `allocation` | Inform | Orange |
+| `tooling` | Inform | Orange |
+| `commitment_strategy` | Optimize | Blue |
+| `anomaly_detection` | Optimize | Blue |
+| `optimization` | Optimize | Blue |
+| `accountability` | Operate | Purple |
+
+Group sub-scores and the overall score are computed automatically.
+
+### Scoring rubric — how to derive scores from agent data
+
+Use the queries in preceding sections to gather evidence, then map to a score:
+
+#### Visibility (Inform)
+| Evidence | Score |
+|---|---|
+| Perspectives exist; no cost categories | 1 — Crawl |
+| Cost categories deployed (≥1 mapping with buckets) | 2 — Walk |
+| All BUs have dedicated perspectives + categories, 4+ clouds | 3 — Run |
+
+#### Allocation (Inform)
+| Evidence | Score |
+|---|---|
+| Allocated cost < 50 % | 1 — Crawl |
+| Allocated cost 50–79 % | 2 — Walk |
+| Allocated cost ≥ 80 % | 3 — Run |
+
+*Query: `cost_breakdown` grouped by `cost_category` (Business Units mapping), compare "Unattributed" vs total.*
+
+#### Commitment Strategy (Optimize)
+| Evidence | Score |
+|---|---|
+| CO enabled; < 50 % coverage | 1 — Crawl |
+| EC2 coverage 50–89 %; RDS / ElastiCache uncovered | 2 — Walk |
+| EC2 + RDS + ElastiCache ≥ 90 % coverage, utilisation > 80 % | 3 — Run |
+
+*Query: `cost_commitment_summary`, `cost_commitment_coverage`, `cost_commitment_utilisation`.*
+
+#### Anomaly Detection (Optimize)
+| Evidence | Score |
+|---|---|
+| Budgets exist; no anomaly rules | 1 — Crawl |
+| Budgets with alerts firing; anomaly detection enabled | 2 — Walk |
+| Active anomaly rules with response process; zero unreviewed anomalies | 3 — Run |
+
+*Query: `cost_budget` (check `actualCostAlerts`), `cost_anomaly_summary`.*
+
+#### Optimization (Optimize)
+| Evidence | Score |
+|---|---|
+| < 10 AutoStopping rules; many open recommendations | 1 — Crawl |
+| AutoStopping active in multiple BUs; recommendations being actioned | 2 — Walk |
+| ≥ 50 AutoStopping rules saving > $X/mo; < 20 open high-value recommendations | 3 — Run |
+
+*Query: `cost_autostopping_savings_cumulative`, `cost_recommendation` list.*
+
+#### Accountability (Operate)
+| Evidence | Score |
+|---|---|
+| Cost categories exist but no chargeback | 1 — Crawl |
+| BU-level cost visibility; allocation ≥ 50 % | 2 — Walk |
+| Automated chargeback + showback with BU sign-off | 3 — Run |
+
+*Inferred from Allocation score + cost category coverage.*
+
+#### Tooling (Inform)
+| Evidence | Score |
+|---|---|
+| FinOps agent accessible; ad-hoc usage only | 1 — Crawl |
+| Weekly agent usage; reports produced regularly | 2 — Walk |
+| Automated recurring reports; BVR cadence established | 3 — Run |
+
+*Assessed from customer engagement, not a direct API query.*
 
 ---

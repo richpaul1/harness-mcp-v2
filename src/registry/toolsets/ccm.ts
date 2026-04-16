@@ -1,5 +1,5 @@
 import type { ToolsetDefinition } from "../types.js";
-import { ngExtract, pageExtract, passthrough, gqlExtract, ccmBusinessMappingListExtract, ccmBusinessMappingListCompactExtract, ccmRecommendationListCompactExtract, ccmBudgetListCompactExtract, ccmBudgetDetailExtract, ccmCommitmentSummaryExtract, ccmCommitmentCoverageExtract, ccmCommitmentSavingsExtract, ccmCommitmentUtilisationExtract, ccmCommitmentFiltersExtract, ccmCommitmentAccountsExtract, ccmCommitmentSavingsOverviewExtract, ccmCommitmentSpendDetailExtract } from "../extractors.js";
+import { ngExtract, pageExtract, passthrough, gqlExtract, ccmBusinessMappingListExtract, ccmBusinessMappingListCompactExtract, ccmRecommendationListCompactExtract, ccmBudgetListCompactExtract, ccmBudgetDetailExtract, ccmCommitmentSummaryExtract, ccmCommitmentCoverageExtract, ccmCommitmentSavingsExtract, ccmCommitmentUtilisationExtract, ccmCommitmentFiltersExtract, ccmCommitmentAccountsExtract, ccmCommitmentSavingsOverviewExtract, ccmCommitmentSpendDetailExtract, ccmAutoStoppingListExtract, ccmAutoStoppingDetailExtract, ccmAutoStoppingCumulativeSavingsExtract, ccmAutoStoppingRuleSavingsExtract, ccmAutoStoppingLogsExtract, ccmAutoStoppingSchedulesExtract } from "../extractors.js";
 
 // ---------------------------------------------------------------------------
 // GraphQL queries — ported from the official Go MCP server
@@ -2151,6 +2151,207 @@ harness_ccm_finops_get: Time-series detail for a specific budget — month-by-mo
           bodyBuilder: (input) => input.body ?? {},
           responseExtractor: passthrough,
           description: "Get estimated savings for a cloud account.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 23. cost_autostopping_rule — AutoStopping rules list + detail
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_autostopping_rule",
+      displayName: "AutoStopping Rule",
+      description:
+        "Harness AutoStopping rules manage idle cloud resources (VMs, ECS, RDS, Kubernetes) " +
+        "by automatically shutting them down when idle and bringing them back on demand. " +
+        "List all rules to see status, idle time config, and savings. " +
+        "Get a specific rule by passing its numeric ID as resource_id.",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: ["resource_id"],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/autostopping-rules",
+      diagnosticHint:
+        "Use 'list' to show all AutoStopping rules with status and cloud info. " +
+        "Use 'get' with rule_id as resource_id for full detail on a single rule.",
+      operations: {
+        list: {
+          method: "POST",
+          path: "/lw/api/accounts/{accountId}/autostopping/rules/list",
+          pathParams: { account_id: "accountId" },
+          bodyBuilder: (input) => {
+            const body: Record<string, unknown> = {};
+            if (input.page !== undefined) body.page = input.page;
+            if (input.size !== undefined) body.limit = input.size;
+            if (input.search_term) body.text = input.search_term;
+            if (input.filters) body.filters = input.filters;
+            return body;
+          },
+          responseExtractor: ccmAutoStoppingListExtract,
+          description: "List AutoStopping rules with pagination and optional text search.",
+        },
+        get: {
+          method: "GET",
+          path: "/lw/api/accounts/{accountId}/autostopping/rules/{ruleId}",
+          pathParams: {
+            account_id: "accountId",
+            resource_id: "ruleId",
+          },
+          responseExtractor: ccmAutoStoppingDetailExtract,
+          description: "Get full detail for a single AutoStopping rule.",
+        },
+      },
+      listFilterFields: [
+        { name: "search_term", description: "Filter rules by name or keyword" },
+      ],
+    },
+
+    // ------------------------------------------------------------------
+    // 24. cost_autostopping_savings — Per-rule daily savings breakdown
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_autostopping_savings",
+      displayName: "AutoStopping Rule Savings",
+      description:
+        "Daily savings breakdown for a single AutoStopping rule. " +
+        "Shows potential cost vs actual cost, idle hours, and savings percentage per day. " +
+        "Pass the rule's numeric ID as resource_id.",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: ["resource_id"],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/autostopping-rules/{ruleId}",
+      diagnosticHint:
+        "Returns daily chart data showing cost and savings for a specific rule. " +
+        "Filter by from_date and to_date (Unix epoch seconds).",
+      operations: {
+        get: {
+          method: "GET",
+          path: "/lw/api/accounts/{accountId}/autostopping/rules/{ruleId}/savings",
+          pathParams: {
+            account_id: "accountId",
+            resource_id: "ruleId",
+          },
+          queryParams: { from_date: "from", to_date: "to" },
+          responseExtractor: ccmAutoStoppingRuleSavingsExtract,
+          description: "Get daily savings breakdown for one AutoStopping rule.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 25. cost_autostopping_savings_cumulative — Cross-rule savings summary
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_autostopping_savings_cumulative",
+      displayName: "AutoStopping Cumulative Savings",
+      description:
+        "Aggregate savings across all AutoStopping rules. " +
+        "Shows total potential cost, actual cost, total savings, savings %, K8s breakdown, and a daily chart. " +
+        "Use to answer 'how much has AutoStopping saved overall?' " +
+        "from_date and to_date are YYYY-MM-DD strings. Optionally filter by cloud provider (aws, gcp, azure).",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: [],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/autostopping-rules",
+      diagnosticHint:
+        "Returns overall savings numbers and a daily timeseries. " +
+        "from_date and to_date are YYYY-MM-DD strings (e.g. 2026-04-01). " +
+        "Use filter_cloud_provider (aws, gcp, azure — comma-separated) to scope to a single cloud.",
+      operations: {
+        list: {
+          method: "POST",
+          path: "/lw/api/accounts/{accountId}/autostopping/rules/savings/cumulative",
+          pathParams: { account_id: "accountId" },
+          bodyBuilder: (input) => {
+            const body: Record<string, unknown> = {
+              dry_run: false,
+              from: input.from_date as string | undefined,
+              to: input.to_date as string | undefined,
+            };
+            const cloudProvider = input.filter_cloud_provider as string | undefined;
+            if (cloudProvider) {
+              const values = cloudProvider
+                .split(",")
+                .map((s) => s.trim().toLowerCase())
+                .filter(Boolean);
+              if (values.length > 0) {
+                body.filters = [{ field: "service_provider", operator: "equals", values }];
+              }
+            }
+            return body;
+          },
+          responseExtractor: ccmAutoStoppingCumulativeSavingsExtract,
+          description:
+            "Get cumulative AutoStopping savings across all rules. " +
+            "from_date / to_date are YYYY-MM-DD strings. " +
+            "filter_cloud_provider accepts comma-separated values: aws, gcp, azure.",
+        },
+      },
+      listFilterFields: [
+        { name: "from_date", description: "Start date as YYYY-MM-DD string (e.g. 2026-04-01)" },
+        { name: "to_date", description: "End date as YYYY-MM-DD string (e.g. 2026-04-15)" },
+        {
+          name: "filter_cloud_provider",
+          description:
+            "Scope to one or more cloud providers — comma-separated: aws, gcp, azure. " +
+            "Maps to the API filters array (field: service_provider).",
+        },
+      ],
+    },
+
+    // ------------------------------------------------------------------
+    // 26. cost_autostopping_logs — Activity logs for a specific rule
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_autostopping_logs",
+      displayName: "AutoStopping Rule Logs",
+      description:
+        "Activity logs for a specific AutoStopping rule showing state transitions " +
+        "(cooling down, stopped, active). Pass rule's numeric ID as resource_id.",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: ["resource_id"],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/autostopping-rules/{ruleId}",
+      diagnosticHint:
+        "Returns paginated logs with state changes. " +
+        "Use to debug why a rule did or didn't stop resources.",
+      operations: {
+        get: {
+          method: "GET",
+          path: "/lw/api/accounts/{accountId}/autostopping/rules/{ruleId}/logs/v2",
+          pathParams: {
+            account_id: "accountId",
+            resource_id: "ruleId",
+          },
+          queryParams: { page: "page", size: "limit" },
+          responseExtractor: ccmAutoStoppingLogsExtract,
+          description: "Get activity logs for a single AutoStopping rule.",
+        },
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // 27. cost_autostopping_schedule — Schedules (uptime/downtime windows)
+    // ------------------------------------------------------------------
+    {
+      resourceType: "cost_autostopping_schedule",
+      displayName: "AutoStopping Schedules",
+      description:
+        "Fixed uptime/downtime schedules applied to AutoStopping rules. " +
+        "Schedules define recurring windows when resources should be forced on or off. " +
+        "Lists all schedules for the account.",
+      toolset: "ccm",
+      scope: "account",
+      identifierFields: [],
+      deepLinkTemplate: "/ng/account/{accountId}/ce/autostopping-rules",
+      diagnosticHint:
+        "Returns all schedules with type (uptime/downtime), days, and time windows.",
+      operations: {
+        list: {
+          method: "GET",
+          path: "/lw/api/accounts/{accountId}/schedules",
+          pathParams: { account_id: "accountId" },
+          responseExtractor: ccmAutoStoppingSchedulesExtract,
+          description: "List all AutoStopping schedules (uptime/downtime windows).",
         },
       },
     },
