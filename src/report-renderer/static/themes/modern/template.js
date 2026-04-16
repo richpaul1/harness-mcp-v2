@@ -50,7 +50,7 @@ export function renderShell({
 }) {
   const isPrint = mode === "print";
   const title = `${meta.title} · ${meta.customer || meta.author}`;
-  const themeBase = `/theme/${theme.id}`;
+  const themeBase = `/_report/themes/${theme.id}`;
 
   // Modern cover — editorial, asymmetric, bold monochrome with single accent
   const coverBlock = `
@@ -147,7 +147,7 @@ export function renderShell({
   const appShellEnd = isPrint ? `</main>` : `</div></main></div>`;
 
   const pagedjsBoot = isPrint
-    ? `<script src="/vendor/paged.polyfill.js"></script>
+    ? `<script src="/_report/vendor/paged.polyfill.js"></script>
        <script>
          class ModernHandler extends Paged.Handler {
            constructor(chunker, polisher, caller) { super(chunker, polisher, caller); }
@@ -156,7 +156,7 @@ export function renderShell({
          Paged.registerHandlers(ModernHandler);
        </script>`
     : `<script type="module" src="${themeBase}/app.js"></script>
-       <script type="module" src="/public/theme-switch.js"></script>`;
+       <script type="module" src="/_report/public/theme-switch.js"></script>`;
 
   return `<!doctype html>
 <html lang="en" data-mode="${mode}" data-theme="${theme.id}">
