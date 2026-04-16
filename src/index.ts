@@ -13,6 +13,7 @@ import { registerAllTools } from "./tools/index.js";
 import { registerAllResources } from "./resources/index.js";
 import { registerAllPrompts } from "./prompts/index.js";
 import { parseArgs } from "./utils/cli.js";
+import { mountReportRoutes, setHttpReportBaseUrl } from "./report-renderer/index.js";
 
 const log = createLogger("main");
 
@@ -132,6 +133,13 @@ async function startHttp(config: Config, port: number): Promise<void> {
     }
     next();
   });
+
+  // Mount the report renderer routes on the same Express app — reports are
+  // served from the same host:port as the MCP endpoint. The PDF exporter needs
+  // to know the public base URL so Playwright can drive the print preview.
+  const reportBaseUrl = `http://localhost:${port}`;
+  mountReportRoutes(app, { publicBaseUrl: reportBaseUrl });
+  setHttpReportBaseUrl(reportBaseUrl);
 
   // ---- Session store ----
   const sessions = new Map<string, Session>();

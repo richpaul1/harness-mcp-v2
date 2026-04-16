@@ -40,6 +40,12 @@ const RawConfigSchema = z
   HARNESS_CCM_CHART_MAX_HEIGHT: z.coerce.number().min(120).max(4096).default(1240),
   /** Max data points per chart (sanitized slice). */
   HARNESS_CCM_CHART_MAX_POINTS: z.coerce.number().min(1).max(500).default(120),
+  /**
+   * Report renderer port — only used in stdio transport mode where there is no
+   * MCP HTTP app to mount onto. In HTTP mode, reports share the MCP `PORT`
+   * (default 3000) at `http://localhost:<PORT>/reports/<id>/`.
+   */
+  HARNESS_REPORT_PORT: z.coerce.number().min(1).max(65535).default(4321),
 })
   .superRefine((data, ctx) => {
     const hasKey = Boolean(data.HARNESS_API_KEY?.trim());

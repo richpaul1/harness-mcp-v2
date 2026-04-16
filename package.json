@@ -11,7 +11,8 @@
     "build/"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:copy-assets",
+    "build:copy-assets": "node -e \"const fs=require('fs'),path=require('path');fs.cpSync('src/report-renderer/static','build/report-renderer/static',{recursive:true});console.log('Copied report-renderer static assets');fs.mkdirSync('build/docs',{recursive:true});fs.copyFileSync('src/docs/finops-guide.md','build/docs/finops-guide.md');console.log('Copied finops-guide.md');\"",
     "dev": "npm run build && concurrently \"npm:dev:watch\" \"npm:dev:serve\"",
     "dev:watch": "tsc --watch",
     "dev:serve": "nodemon --watch build --ext js --delay 1 --exec \"node --env-file=.env build/index.js http\"",
@@ -46,14 +47,27 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@napi-rs/canvas": "^0.1.97",
+    "chokidar": "^5.0.0",
     "express": "^5.2.1",
+    "gray-matter": "^4.0.3",
+    "markdown-it": "^14.1.1",
+    "markdown-it-anchor": "^9.2.0",
+    "markdown-it-attrs": "^4.3.1",
+    "markdown-it-container": "^4.0.0",
+    "markdown-it-deflist": "^3.0.0",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-task-lists": "^2.1.1",
     "marked": "^15.0.0",
+    "pagedjs": "^0.4.3",
     "pdfkit": "^0.16.0",
+    "playwright": "^1.59.1",
+    "slugify": "^1.6.9",
     "yaml": "^2.8.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.13.5",
     "@types/pdfkit": "^0.13.9",
     "concurrently": "^9.1.2",
